@@ -1,0 +1,873 @@
+/* Fal for Miro — dark design system (Fal Panel Redesign).
+ * Dark by default: near-black panels, hairline borders, Roobert PRO type,
+ * per-capability accent tones, yellow (#FFDD33) as the primary. */
+:root {
+  --bg: #0f0f11;
+  --card: #141417;
+  --card-2: #1c1c20;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --fg: #f4f4f6;
+  --fg-2: #c9c9cf;
+  --muted: #8a8a92;
+  --muted-2: #66666e;
+  --mono: #5f5f67;
+  --accent: #ffdd33; /* primary (fal yellow) */
+  --on-accent: #050505;
+  --ok: #6edb8c;
+  --err: #f25a6e;
+  --info: #4bd1f6;
+  --radius-panel: 16px;
+  --radius-card: 12px;
+  --radius-pill: 999px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  font-family: 'Roobert PRO', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+}
+
+/* Scrollbars — thin, subtle. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.content {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 24px;
+}
+
+/* Top bar — fal logo + credits pill. */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  background: var(--bg);
+}
+
+.brand {
+  font: 900 15px 'Roobert PRO', system-ui, sans-serif;
+  font-style: italic;
+  color: var(--accent);
+  letter-spacing: -0.02em;
+}
+
+.brand-sub {
+  font: 500 12px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--muted-2);
+}
+
+.back-link {
+  background: none;
+  border: none;
+  color: var(--fg-2);
+  cursor: pointer;
+  font: 500 13px 'Roobert PRO', system-ui, sans-serif;
+  padding: 0;
+}
+.back-link:hover {
+  color: var(--fg);
+}
+
+.credits {
+  margin-left: auto;
+  font: 600 12px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--ok);
+  background: rgba(110, 219, 140, 0.12);
+  border: 1px solid rgba(110, 219, 140, 0.28);
+  border-radius: var(--radius-pill);
+  padding: 3px 10px;
+}
+
+.screen {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.hero .title {
+  font: 700 16px 'Roobert PRO', system-ui, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.hero .sub {
+  color: var(--muted);
+  font: 500 12px 'Roobert PRO', system-ui, sans-serif;
+  margin-top: 4px;
+  word-break: break-all;
+}
+
+/* Inputs */
+.search,
+textarea,
+select,
+input[type='number'],
+input[type='url'],
+input[type='text'] {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--card);
+  color: var(--fg);
+  font: 400 13px 'Roobert PRO', system-ui, sans-serif;
+  width: 100%;
+  outline: none;
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+}
+textarea {
+  resize: vertical;
+}
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: rgba(255, 221, 51, 0.5);
+}
+
+/* Cards (model rows, tool cards) */
+.card {
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: var(--radius-card);
+  padding: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  transition: border-color 140ms var(--ease), background 140ms var(--ease);
+}
+.card:hover {
+  border-color: var(--border-strong);
+  background: #17171b;
+}
+
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.card-title {
+  font: 600 13px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--fg);
+}
+
+.card-sub {
+  color: var(--muted);
+  font: 500 11px 'Roobert PRO', system-ui, sans-serif;
+  margin-top: 2px;
+  word-break: break-all;
+}
+
+/* Capability accent dot. */
+.cap-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font: 500 13px 'Roobert PRO', system-ui, sans-serif;
+}
+
+.field > span {
+  color: var(--muted);
+}
+
+.reset-link {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: 600 12px 'Roobert PRO', system-ui, sans-serif;
+  padding: 0;
+}
+.reset-link:disabled {
+  color: var(--muted-2);
+  cursor: default;
+}
+
+/* Primary action — yellow pill. */
+.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 12px 20px;
+  font: 600 14px 'Roobert PRO', system-ui, sans-serif;
+  cursor: pointer;
+  transition: filter 140ms var(--ease);
+}
+.primary:hover {
+  filter: brightness(1.06);
+}
+.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.notice {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: var(--fg-2);
+  font: 400 12px/1.5 'Roobert PRO', system-ui, sans-serif;
+  background: var(--card);
+}
+.notice code {
+  color: var(--fg);
+  background: var(--card-2);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* Source-image / slot selectors */
+.source-image {
+  font: 500 13px 'Roobert PRO', system-ui, sans-serif;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 12px;
+  color: var(--muted);
+  background: var(--card);
+}
+.source-image.chosen {
+  border-color: rgba(110, 219, 140, 0.4);
+  background: rgba(110, 219, 140, 0.08);
+  color: var(--fg);
+}
+.source-image .check {
+  color: var(--ok);
+  font-weight: 700;
+}
+.source-image .src-title {
+  color: var(--muted);
+}
+
+.preview {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 12px;
+  background: var(--card);
+}
+.preview > summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  color: var(--muted);
+  user-select: none;
+  font-weight: 600;
+}
+.preview-body {
+  padding: 0 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.preview-body > div {
+  display: flex;
+  gap: 8px;
+}
+.preview-body .k {
+  color: var(--muted);
+  flex: 0 0 64px;
+}
+.preview-body .v {
+  color: var(--fg);
+  word-break: break-word;
+}
+.preview-note {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.ref-hint {
+  font: 500 12px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--ok);
+  background: rgba(110, 219, 140, 0.08);
+  border: 1px solid rgba(110, 219, 140, 0.26);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.ref-hint.muted {
+  color: var(--muted);
+  background: none;
+  border-color: var(--border);
+}
+.ref-hint code {
+  color: inherit;
+  font-weight: 600;
+}
+
+/* Model-family page — task dropdown above the task's screen */
+.family-screen {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+/* The task's screen is nested inside — it must not double-pad. */
+.family-screen .screen {
+  padding: 0;
+}
+.task-select select {
+  cursor: pointer;
+}
+
+/* Provider logo chip. */
+.tile-icon-logo {
+  overflow: hidden;
+  padding: 0;
+}
+/* Monogram badge — the coloured SVG fills the chip (clipped to its radius). */
+.tile-icon-logo.badge img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* Real lab mark — light-on-transparent art, contained on a dark chip. */
+.tile-icon-logo.mark {
+  background: #1b1b20;
+  border: 1px solid var(--border);
+}
+.tile-icon-logo.mark img {
+  width: 76%;
+  height: 76%;
+  object-fit: contain;
+}
+
+/* Curate-models footer link */
+.settings-link {
+  align-self: center;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* Favourite star on model rows */
+.fav-star {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--muted-2, #6a6a72);
+  transition: color 140ms var(--ease), transform 120ms var(--ease);
+}
+.fav-star:hover {
+  color: var(--accent);
+}
+.fav-star.on {
+  color: var(--accent);
+}
+
+/* Model metadata chips (category + tags from fal metadata) */
+.model-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  font: 600 11px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--muted);
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+.chip-cat {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: transparent;
+}
+
+/* Reference-to-video token map */
+.ref-map {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 10px 12px;
+  background: var(--card);
+}
+.ref-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font: 500 12px 'Roobert PRO', system-ui, sans-serif;
+}
+.ref-row code {
+  color: var(--accent);
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+.ref-row span {
+  color: var(--fg-2);
+  word-break: break-word;
+}
+
+/* Asset naming block */
+.asset-naming {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Schema-driven form */
+.schema-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 500 13px 'Roobert PRO', system-ui, sans-serif;
+}
+.field .req,
+.field-row .req {
+  color: var(--accent);
+}
+.hint {
+  color: var(--muted);
+  font: 400 11px/1.5 'Roobert PRO', system-ui, sans-serif;
+}
+.hint strong {
+  color: var(--fg-2);
+}
+.doc-link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.doc-link:hover {
+  text-decoration: underline;
+}
+.advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.advanced-toggle {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: 500 13px 'Roobert PRO', system-ui, sans-serif;
+  padding: 0;
+}
+.advanced-toggle:hover {
+  color: var(--fg);
+}
+
+/* Eyebrow label (e.g. "For your selection"). */
+.eyebrow {
+  font: 500 10px 'Roobert PRO', system-ui, sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* "For your selection" zone at the top of home. */
+.sel-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Browse ↔ Provider segmented toggle. */
+.seg {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--card-2);
+  border-radius: 10px;
+}
+.seg button {
+  flex: 1;
+  padding: 7px 6px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font: 600 12px 'Roobert PRO', system-ui, sans-serif;
+  background: transparent;
+  color: var(--muted);
+}
+.seg button.active {
+  background: var(--card);
+  color: var(--fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+/* Browse tiles. */
+.tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: var(--radius-card);
+  cursor: pointer;
+  transition: border-color 140ms var(--ease), background 140ms var(--ease);
+}
+.tile:hover {
+  border-color: var(--border-strong);
+  background: #17171b;
+}
+.tile-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+.tile-icon-neutral {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  font: 700 15px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--fg-2);
+}
+.tile-label {
+  font: 600 13px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--fg);
+}
+.tile-count {
+  font: 500 11px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--muted);
+}
+
+/* Drill-down header. */
+.drill-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.drill-title {
+  font: 700 15px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--fg);
+}
+.count-pill {
+  margin-left: auto;
+  font: 500 11px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--muted);
+  background: var(--card-2);
+  border-radius: var(--radius-pill);
+  padding: 2px 9px;
+}
+
+/* Tool-card leading icon chip. */
+.tool-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  font-size: 16px;
+  flex: 0 0 auto;
+}
+
+/* Selection tools */
+.selection-tools {
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--card);
+}
+.selection-tools .st-head {
+  font: 600 13px 'Roobert PRO', system-ui, sans-serif;
+}
+.lineage {
+  margin: 0;
+  font: 500 12px/1.5 ui-monospace, Menlo, monospace;
+  white-space: pre-wrap;
+  color: var(--muted);
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+/* Multi-view image slots */
+.view-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Active jobs tray */
+.tray {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 0;
+}
+.tray-job {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 11px 12px;
+  font-size: 12px;
+}
+.tray-job .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: 0 0 auto;
+}
+.tray-job.running .dot {
+  animation: fppulse 1.4s var(--ease) infinite;
+}
+.tray-job.succeeded .dot {
+  background: var(--ok);
+}
+.tray-job.failed .dot {
+  background: var(--err);
+}
+.tray-label {
+  font: 600 13px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--fg);
+}
+.tray-status {
+  color: var(--muted);
+  margin-left: auto;
+  font: 500 11px 'Roobert PRO', system-ui, sans-serif;
+}
+.tray-job.failed .tray-status {
+  color: #ffb2b2;
+}
+
+/* ---- Fullscreen capture / builder modals ---- */
+.capture {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 0;
+  gap: 0;
+  box-sizing: border-box;
+  background: var(--bg);
+}
+.capture-head {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  flex: 0 0 auto;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.capture-head .title {
+  font: 700 16px 'Roobert PRO', system-ui, sans-serif;
+  letter-spacing: -0.01em;
+}
+.capture-head .sub {
+  font: 400 12px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.tone-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  flex: 0 0 auto;
+}
+
+.capture-head .back-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 9px;
+  background: var(--card-2);
+  border: 1px solid var(--border-strong);
+  color: var(--fg-2);
+}
+
+/* Dark dotted stage — the WYSIWYG capture area. */
+.capture-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+  background: #08080a;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 26px 26px;
+}
+.capture-frame {
+  position: relative;
+  background: #0c0c0e;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.capture-frame model-viewer {
+  width: 100%;
+  height: 100%;
+}
+.capture-stage video {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.capture-controls {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: 14px 20px 16px;
+  border-top: 1px solid var(--border);
+}
+.capture-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.capture-ratios {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Pill chips (aspect ratio, gizmo tool, nav, animation clips). */
+.ratio-chip {
+  background: var(--card-2);
+  border: 1px solid var(--border-strong);
+  color: var(--fg-2);
+  border-radius: var(--radius-pill);
+  padding: 6px 12px;
+  font: 500 12px 'Roobert PRO', system-ui, sans-serif;
+  cursor: pointer;
+  transition: border-color 120ms var(--ease), color 120ms var(--ease);
+}
+.ratio-chip:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+  color: var(--fg);
+}
+.ratio-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.ratio-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.label {
+  font: 600 11px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--muted);
+}
+
+.snap-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.empty-state {
+  font: 400 13px/1.5 'Roobert PRO', system-ui, sans-serif;
+  border: 1px dashed var(--border-strong);
+  border-radius: 12px;
+  padding: 24px 28px;
+  color: var(--muted);
+  text-align: center;
+  max-width: 380px;
+}
+
+.muted {
+  color: var(--muted);
+  font: 500 11px 'Roobert PRO', system-ui, sans-serif;
+}
+.error {
+  color: #ffb2b2;
+  font: 400 12px/1.4 'Roobert PRO', system-ui, sans-serif;
+}
+
+/* Range inputs — yellow accent. */
+input[type='range'] {
+  accent-color: var(--accent);
+}
+
+@keyframes fppulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}

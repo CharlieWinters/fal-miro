@@ -1,0 +1,284 @@
+// Turn a Fal model's OpenAPI 3.0 spec (from /api/fal/schema) into a flat list
+// of input fields the panel can render. This is the core of Option A — the UI
+// is built from the live schema, not hardcoded per model.
+
+export type FieldKind =
+  | 'text' // multi-line string (prompt-like)
+  | 'string' // single-line string
+  | 'number' // float
+  | 'integer'
+  | 'boolean'
+  | 'enum'
+  | 'image' // an image URL input (can be fed from the board)
+  | 'json'; // object/array/unknown — raw JSON for power users
+
+export type Field = {
+  name: string;
+  label: string;
+  description?: string;
+  kind: FieldKind;
+  required: boolean;
+  default?: unknown;
+  enumValues?: Array<string | number>;
+  min?: number;
+  max?: number;
+  /** For `image` fields: true when it takes an array (e.g. `image_urls`). */
+  imageMultiple?: boolean;
+};
+
+type AnySchema = Record<string, any>;
+
+/** Resolve a local `#/components/...` $ref against the root document. */
+function resolveRef(root: AnySchema, ref: string): AnySchema | null {
+  if (!ref.startsWith('#/')) return null;
+  let node: any = root;
+  for (const part of ref.slice(2).split('/')) {
+    node = node?.[part];
+    if (node == null) return null;
+  }
+  return node as AnySchema;
+}
+
+/** Follow a $ref one level if present. */
+function deref(root: AnySchema, schema: AnySchema): AnySchema {
+  if (schema && typeof schema.$ref === 'string') {
+    return resolveRef(root, schema.$ref) ?? schema;
+  }
+  return schema;
+}
+
+/** Collect enum values from a property, including via anyOf/oneOf and $refs. */
+function collectEnum(root: AnySchema, prop: AnySchema): Array<string | number> | null {
+  const direct = prop.enum;
+  if (Array.isArray(direct) && direct.length) return direct;
+  for (const key of ['anyOf', 'oneOf', 'allOf'] as const) {
+    const branches = prop[key];
+    if (Array.isArray(branches)) {
+      for (const b of branches) {
+        const resolved = deref(root, b);
+        if (Array.isArray(resolved.enum) && resolved.enum.length) return resolved.enum;
+      }
+    }
+  }
+  return null;
+}
+
+/** First primitive type found directly or in a union branch. */
+function primitiveType(root: AnySchema, prop: AnySchema): string | undefined {
+  if (typeof prop.type === 'string') return prop.type;
+  for (const key of ['anyOf', 'oneOf', 'allOf'] as const) {
+    const branches = prop[key];
+    if (Array.isArray(branches)) {
+      for (const b of branches) {
+        const r = deref(root, b);
+        if (typeof r.type === 'string' && r.type !== 'null') return r.type;
+      }
+    }
+  }
+  return undefined;
+}
+
+function isImageField(name: string, prop: AnySchema): boolean {
+  // Matches image_url(s), reference_image_url, mask_image_url, and frame urls
+  // (first_frame_url / last_frame_url for first-last-frame video models).
+  if (/(^|_)(image|frame)(_urls?)?$/i.test(name)) return true;
+  const fmt = prop.format;
+  return fmt === 'uri' && /(image|frame)/i.test(name);
+}
+
+function titleFrom(name: string, prop: AnySchema): string {
+  if (typeof prop.title === 'string' && prop.title.trim()) return prop.title;
+  return name
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function classify(root: AnySchema, name: string, rawProp: AnySchema, required: boolean): Field {
+  const prop = deref(root, rawProp);
+  const base: Field = {
+    name,
+    label: titleFrom(name, prop),
+    description: typeof prop.description === 'string' ? prop.description : undefined,
+    kind: 'string',
+    required,
+    default: prop.default,
+    min: typeof prop.minimum === 'number' ? prop.minimum : undefined,
+    max: typeof prop.maximum === 'number' ? prop.maximum : undefined,
+  };
+
+  const enumValues = collectEnum(root, prop);
+  if (enumValues) return { ...base, kind: 'enum', enumValues };
+
+  if (isImageField(name, prop)) {
+    const multiple = primitiveType(root, prop) === 'array' || /urls$/i.test(name);
+    return { ...base, kind: 'image', imageMultiple: multiple };
+  }
+
+  const type = primitiveType(root, prop);
+  switch (type) {
+    case 'boolean':
+      return { ...base, kind: 'boolean' };
+    case 'integer':
+      return { ...base, kind: 'integer' };
+    case 'number':
+      return { ...base, kind: 'number' };
+    case 'string': {
+      const longHint =
+        /prompt|text|description/i.test(name) ||
+        (typeof prop.description === 'string' && prop.description.length > 120);
+      return { ...base, kind: longHint ? 'text' : 'string' };
+    }
+    case 'object':
+    case 'array':
+      return { ...base, kind: 'json' };
+    default:
+      return { ...base, kind: 'string' };
+  }
+}
+
+/** Locate the model's input schema object within the OpenAPI document. */
+function findInputSchema(openapi: AnySchema): AnySchema | null {
+  // Prefer the requestBody schema of the first POST operation.
+  const paths = openapi.paths ?? {};
+  for (const path of Object.keys(paths)) {
+    const post = paths[path]?.post;
+    const schema = post?.requestBody?.content?.['application/json']?.schema;
+    if (schema) {
+      const resolved = deref(openapi, schema);
+      if (resolved?.properties) return resolved;
+    }
+  }
+  // Fallback: a components schema whose name ends in "Input".
+  const schemas = openapi.components?.schemas ?? {};
+  const inputKey =
+    Object.keys(schemas).find((k) => /input$/i.test(k) && schemas[k]?.properties) ??
+    Object.keys(schemas).find((k) => schemas[k]?.properties);
+  return inputKey ? schemas[inputKey] : null;
+}
+
+/**
+ * Parse the OpenAPI doc into ordered input fields. Returns [] if no input
+ * schema can be found (caller should fall back to a prompt-only form).
+ */
+export function parseFalInputSchema(openapi: Record<string, unknown>): Field[] {
+  const root = openapi as AnySchema;
+  const input = findInputSchema(root);
+  if (!input?.properties) return [];
+
+  const required: string[] = Array.isArray(input.required) ? input.required : [];
+  const props = input.properties as Record<string, AnySchema>;
+
+  return Object.keys(props).map((name) => classify(root, name, props[name], required.includes(name)));
+}
+
+/**
+ * Split fields into the always-shown "common" tier (in the order given by
+ * `commonOrder`) and the rest (Advanced). Required fields not in the common
+ * list are promoted to always-shown so a generation can't be under-specified.
+ */
+export function splitFields(
+  fields: Field[],
+  commonOrder: string[],
+): { common: Field[]; advanced: Field[] } {
+  const byName = new Map(fields.map((f) => [f.name, f]));
+  const common: Field[] = [];
+  const used = new Set<string>();
+
+  for (const name of commonOrder) {
+    const f = byName.get(name);
+    if (f) {
+      common.push(f);
+      used.add(name);
+    }
+  }
+  for (const f of fields) {
+    if (!used.has(f.name) && f.required) {
+      common.push(f);
+      used.add(f.name);
+    }
+  }
+  const advanced = fields.filter((f) => !used.has(f.name));
+  return { common, advanced };
+}
+
+/**
+ * Pick the field that board-connected reference images should flow into.
+ * Prefers `image_urls` / `image_url` / `reference_image_url`, then any other
+ * top-level image field, and never a mask. Returns null if the model takes no
+ * (top-level) image input — in which case references are simply not sent.
+ */
+export function pickReferenceField(
+  fields: Field[],
+): { name: string; multiple: boolean; required: boolean } | null {
+  const candidates = fields.filter((f) => f.kind === 'image' && !/mask/i.test(f.name));
+  if (candidates.length === 0) return null;
+  // Prefer the canonical primary-image field by name, then any *required* image
+  // field, and only then the first one. This matters for models with several
+  // image inputs (e.g. Hunyuan3D v3's optional multi-view back/left/right URLs
+  // alongside the required `input_image_url`) — falling back to candidates[0]
+  // would pick an optional field and lose the image-primary board flow.
+  const preferred = ['image_urls', 'image_url', 'input_image_url', 'reference_image_url'];
+  const chosen =
+    preferred.map((n) => candidates.find((f) => f.name === n)).find(Boolean) ??
+    candidates.find((f) => f.required) ??
+    candidates[0];
+  return { name: chosen.name, multiple: Boolean(chosen.imageMultiple), required: chosen.required };
+}
+
+/**
+ * All *single* (non-array, non-mask) image fields, ordered with the required
+ * one(s) first. Models with several of these are "multi-view" — e.g. Hunyuan3D
+ * v3 takes `input_image_url` (front, required) plus optional back/left/right
+ * views of the same object — and get a named-slot UI rather than one selector.
+ */
+export function pickViewImageFields(
+  fields: Field[],
+): Array<{ name: string; label: string; required: boolean }> {
+  return fields
+    .filter((f) => f.kind === 'image' && !f.imageMultiple && !/mask/i.test(f.name))
+    .map((f) => ({ name: f.name, label: f.label, required: f.required }))
+    .sort((a, b) => Number(b.required) - Number(a.required));
+}
+
+/**
+ * For first-last-frame video models: the two image fields to fill, identified
+ * by 'first'/'last' in their names. Returns null if the model isn't a two-frame
+ * model.
+ */
+export function pickFrameFields(fields: Field[]): { first: string; last: string } | null {
+  const imgs = fields.filter((f) => f.kind === 'image');
+  // The "end/last" frame field is the tell (e.g. last_frame_url, end_image_url).
+  const last = imgs.find((f) => /(^|_)(last|end)/i.test(f.name));
+  if (!last) return null;
+  // The start frame: an explicit first/start field, else the plain image_url.
+  const first =
+    imgs.find((f) => f !== last && /(^|_)(first|start)/i.test(f.name)) ??
+    imgs.find((f) => f !== last && f.name === 'image_url') ??
+    imgs.find((f) => f !== last);
+  return first ? { first: first.name, last: last.name } : null;
+}
+
+/** A boolean "safety checker" toggle (e.g. FLUX's `enable_safety_checker`). */
+function isSafetyCheckerField(f: Field): boolean {
+  return f.kind === 'boolean' && /safety[_ ]?checker/i.test(f.name);
+}
+
+/**
+ * Initial values from each field's default (skips undefined defaults).
+ *
+ * Policy override: safety-checker toggles default to OFF. Fal's checker
+ * (schema default `true`) blocks a lot of plainly SFW prompts, so we opt out by
+ * default — but only when the model actually exposes the field, and the user
+ * can flip it back on in Advanced.
+ */
+export function defaultsFor(fields: Field[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const f of fields) {
+    if (isSafetyCheckerField(f)) {
+      out[f.name] = false;
+    } else if (f.default !== undefined) {
+      out[f.name] = f.default;
+    }
+  }
+  return out;
+}

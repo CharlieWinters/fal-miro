@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Secrets / environment (keep only the *.example templates)
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+build/
+
+# Local tooling & session data — never publish
+.claude/
+.playwright-mcp/
+
+# Logs
+*.log
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.local

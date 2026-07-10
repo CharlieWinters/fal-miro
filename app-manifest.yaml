@@ -1,0 +1,24 @@
+# Paste into the "App Manifest" section of your Miro app at
+# https://miro.com/app/settings/user-profile/apps/  (after creating an app).
+# Replace `https://your-frontend.example.com` with wherever you host the
+# static build (Netlify, S3+CloudFront, Vercel, etc).
+
+appName: Fal for Miro
+sdkVersion: SDK_V2
+
+sdkUri: https://your-frontend.example.com/index.html
+
+scopes:
+  - boards:read
+  - boards:write
+  - identity:read
+
+redirectUris:
+  - https://your-frontend.example.com/
+
+icons:
+  - src: https://your-frontend.example.com/icon.svg
+    size: 24
+
+# When the user clicks the app icon, the headless (sdkUri) iframe loads and
+# calls miro.board.ui.openPanel({ url: 'app.html' }).
