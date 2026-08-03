@@ -19,8 +19,17 @@ agent and broadcasts `AGENT_UPDATE` progress back.
 
 ## Backend (the part this scaffold fully implements)
 
-A small Express server in `backend/src/server.js`. The `FAL_KEY` lives only
-here — the frontend always goes through these routes.
+A small [Hono](https://hono.dev) app in `backend/src/app.ts`. The `FAL_KEY`
+lives only here — the frontend always goes through these routes. Hono's
+routes/handlers are runtime-agnostic; `src/node.ts` and `src/worker.ts` are
+thin entrypoints that boot the same `app` on Node (`@hono/node-server`) or
+Cloudflare Workers respectively — so this backend deploys to a plain Node
+host *or* to Workers with no code changes, only a different entrypoint. See
+the README's [Deploy your own backend](README.md#deploy-your-own-backend)
+for the two paths. Env vars are read per-request via `hono/adapter`'s
+`env()` (`process.env` on Node, `c.env`/wrangler bindings on Workers) rather
+than once at module load, since Workers only exposes bindings on the request
+context.
 
 | Method | Path                          | What |
 | ------ | ----------------------------- | --- |
@@ -29,6 +38,11 @@ here — the frontend always goes through these routes.
 | GET    | `/api/fal/status/:requestId`  | `?endpointId=…`. Wraps `fal.queue.status`; on completion also calls `fal.queue.result` and returns `{ status, output[], data }`. |
 | POST   | `/api/fal/cancel/:requestId`  | `?endpointId=…`. Wraps `fal.queue.cancel`. |
 | GET    | `/api/fal/schema`             | `?endpointId=…`. Proxies Fal's Platform Models API (`expand=openapi-3.0`) → the model's OpenAPI schema. Drives the Option-A generic form. |
+| GET    | `/api/fal/models`             | Paginated Fal model catalog with `{ category, tags, displayName, thumbnailUrl }` per endpoint; in-memory 1h TTL cache, `?refresh=1` to bypass. |
+| GET    | `/api/fal/balance`            | `account/billing?expand=credits` via `ADMIN_KEY` — powers the credits badge. |
+| GET    | `/api/fal/estimate`           | `?endpointId=…&units=…&seconds=…` → unit price × units (or × elapsed seconds for time-billed models) → `{ costUSD }`. |
+| GET    | `/embed/video`, `/embed/audio`, `/embed/3d`, `/embed/rig`, `/embed/panorama` | `?url=…`. Tiny HTML players (`<video>`/`<audio>`/`<model-viewer>`/A-Frame `<a-sky>`) that Miro's embed widget iframes, since Miro has no native video/3D/panorama widget. |
+| GET    | `/proxy`                      | `?url=…`. Streams a remote asset back with CORS + `Range` headers (fetch()-based, so it runs unchanged on Node or Workers) — needed wherever a `<model-viewer>`/`<video crossorigin>` snapshot would otherwise taint the canvas on Fal's CORS-less CDN. |
 
 Output extraction is best-effort: `output[]` pulls primary media URLs
 (`images[].url`, `video.url`, `audio.url`, …) out of the model-specific result,

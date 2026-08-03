@@ -15,22 +15,25 @@ ElevenLabs integrations. See `ARCHITECTURE.md`.
 
 ```
 fal-miro/
-  backend/         Express proxy — FAL_KEY lives here only
-    src/server.js  /healthz, /api/fal/run, /status, /cancel, /schema
-  frontend/        Vite + React, three iframes (headless / panel / modal)
-    src/shared/    messageTypes, falCatalog (stub), agentRegistry (empty)
-    src/lib/api.ts Fal backend client
+  backend/           Hono proxy — FAL_KEY lives here only, deploy it anywhere
+    src/app.ts       Routes/logic, runtime-agnostic (/healthz, /api/fal/*, /embed/*, /proxy)
+    src/node.ts      Node entrypoint (npm run dev / start)
+    src/worker.ts    Cloudflare Workers entrypoint (npm run dev:worker / deploy:worker)
+  frontend/          Vite + React, three iframes (headless / panel / modal)
+    src/shared/      messageTypes, falCatalog (stub), agentRegistry (empty)
+    src/lib/api.ts   Fal backend client
 ```
 
 ## Run it (dev)
 
-Backend:
+Backend (Node — see [Deploy your own backend](#deploy-your-own-backend) for Cloudflare Workers):
 
 ```bash
 cd backend
 cp .env.example .env        # then set FAL_KEY=...
 npm install
 npm run dev                 # http://localhost:8789
+npm run lint                 # tsc --noEmit (type-check)
 ```
 
 Frontend:
@@ -62,6 +65,36 @@ curl -X POST localhost:8789/api/fal/run \
 # {"requestId":"…","endpointId":"fal-ai/flux/dev","status":"QUEUED"}
 
 curl "localhost:8789/api/fal/status/<requestId>?endpointId=fal-ai/flux/dev"
+```
+
+## Deploy your own backend
+
+The backend is a small [Hono](https://hono.dev) app (`backend/src/app.ts`) with your `FAL_KEY` as its only real dependency — deploy it wherever you like, then point the frontend's `VITE_API_BASE_URL` at it.
+
+### Cloudflare Workers (recommended — free, zero idle cost)
+
+```bash
+cd backend
+npm install
+wrangler login                       # one-time
+wrangler secret put FAL_KEY          # paste your key
+wrangler secret put ADMIN_KEY        # optional — powers the credits badge + raises /models rate limits
+npm run deploy:worker
+```
+
+`wrangler.toml` holds the non-secret config (`ALLOWED_ORIGINS`, etc.) — edit `ALLOWED_ORIGINS` to your deployed frontend's origin before deploying. For local Workers dev, copy `.dev.vars.example` to `.dev.vars` (gitignored, never committed) and run `npm run dev:worker`.
+
+### Node (Docker / Fly / Railway / any VM)
+
+Same `npm install` + `npm run dev` / `start` as local dev above — any host that can run a long-lived Node process works unchanged. Set `FAL_KEY`, `ADMIN_KEY`, `ALLOWED_ORIGINS`, and `PORT` as environment variables on that host.
+
+### Either way
+
+Point the frontend at it:
+
+```
+# frontend/.env
+VITE_API_BASE_URL=https://your-deployed-backend
 ```
 
 ## Done so far

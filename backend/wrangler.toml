@@ -1,0 +1,17 @@
+name = "fal-miro-backend"
+main = "src/worker.ts"
+compatibility_date = "2026-08-01"
+
+# Non-secret config. Override per-environment below, or with `--var` on
+# `wrangler dev` / `wrangler deploy`.
+[vars]
+ALLOWED_ORIGINS = "http://localhost:5175"
+FAL_PLATFORM_API_BASE = "https://api.fal.ai/v1"
+DEBUG = "1"
+
+# FAL_KEY and ADMIN_KEY are secrets, not vars — they don't belong in this
+# file (it's committed to git). Set them with:
+#   wrangler secret put FAL_KEY
+#   wrangler secret put ADMIN_KEY
+# For local `wrangler dev`, put them in a gitignored `.dev.vars` file instead
+# (copy `.dev.vars.example`).

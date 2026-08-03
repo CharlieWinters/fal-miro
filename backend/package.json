@@ -4,13 +4,23 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch src/server.js",
-    "start": "node src/server.js"
+    "dev": "tsx watch src/node.ts",
+    "start": "tsx src/node.ts",
+    "dev:worker": "wrangler dev",
+    "deploy:worker": "wrangler deploy",
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@fal-ai/client": "^1.2.0",
-    "cors": "^2.8.5",
+    "@fal-ai/client": "^1.10.1",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2"
+    "hono": "^4.12.34"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260801.1",
+    "@hono/node-server": "^2.0.12",
+    "@types/node": "^26.1.2",
+    "tsx": "^4.23.5",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.118.0"
   }
 }

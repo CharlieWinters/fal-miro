@@ -1,0 +1,7 @@
+# Local secrets for `npm run dev:worker` (wrangler dev). Copy to `.dev.vars`
+# (gitignored) and fill in real values — never commit `.dev.vars` itself.
+#
+# In production these are set with `wrangler secret put FAL_KEY` /
+# `wrangler secret put ADMIN_KEY` instead of living in a file.
+FAL_KEY=
+ADMIN_KEY=
