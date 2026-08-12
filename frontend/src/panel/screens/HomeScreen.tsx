@@ -20,6 +20,7 @@ import { ProviderLogo } from '../ProviderLogo';
 import { useCatalogVersion } from '../hooks/useCatalog';
 import { useFirstSelected, useSelectedItems } from '../hooks/useSelection';
 import {
+  connectionMode,
   unwrapModel3dEmbedUrl,
   unwrapVideoEmbedUrl,
   unwrapPanoramaEmbedUrl,
@@ -49,6 +50,12 @@ const CAPABILITY_VERB: Record<Capability, string> = {
   rig: 'Rig + Animate',
   sound: 'Add Sound',
   merge: 'Merge',
+  llm: 'Run LLM',
+  vision: 'Analyze',
+  data: 'Extract Data',
+  training: 'Train',
+  workflow: 'Run Workflow',
+  other: 'Run',
 };
 
 type Drill =
@@ -207,12 +214,15 @@ export function HomeScreen({
   const [browseMode, setBrowseMode] = useState<'category' | 'provider' | 'usecase'>('category');
   const [drill, setDrill] = useState<Drill>(null);
 
-  // Selection-aware capture tools (unchanged).
+  // Selection-aware capture tools — all of them load their source cross-origin
+  // through the backend's /proxy route (Fal's CDN sends no CORS headers), so
+  // they're mothballed in client mode rather than left to fail silently.
+  const captureAvailable = connectionMode() !== 'client';
   const selectedEmbed = useFirstSelected<{ id: string; url?: string }>('embed');
-  const has3dViewerSelected = Boolean(selectedEmbed?.url && unwrapModel3dEmbedUrl(selectedEmbed.url));
-  const hasVideoSelected = Boolean(selectedEmbed?.url && unwrapVideoEmbedUrl(selectedEmbed.url));
-  const hasPanoramaSelected = Boolean(selectedEmbed?.url && unwrapPanoramaEmbedUrl(selectedEmbed.url));
-  const hasRigSelected = Boolean(selectedEmbed?.url && unwrapRigEmbedUrl(selectedEmbed.url));
+  const has3dViewerSelected = captureAvailable && Boolean(selectedEmbed?.url && unwrapModel3dEmbedUrl(selectedEmbed.url));
+  const hasVideoSelected = captureAvailable && Boolean(selectedEmbed?.url && unwrapVideoEmbedUrl(selectedEmbed.url));
+  const hasPanoramaSelected = captureAvailable && Boolean(selectedEmbed?.url && unwrapPanoramaEmbedUrl(selectedEmbed.url));
+  const hasRigSelected = captureAvailable && Boolean(selectedEmbed?.url && unwrapRigEmbedUrl(selectedEmbed.url));
 
   // Selection-aware settings-card reopen — a Card whose description parses as
   // a recipe (see recipeCard.ts) offers to jump back into its model screen.
@@ -223,15 +233,18 @@ export function HomeScreen({
     : '';
 
   const selectedEmbeds = useSelectedItems<{ id: string; url?: string; title?: string }>('embed');
-  const sceneAssets = selectedEmbeds
-    .map((e) => {
-      const glb = e.url ? unwrapModel3dEmbedUrl(e.url) ?? unwrapRigEmbedUrl(e.url) : null;
-      return glb ? { id: e.id, url: glb, name: e.title } : null;
-    })
-    .filter(Boolean) as Array<{ id: string; url: string; name?: string }>;
-  const scenePanorama = selectedEmbeds
-    .map((e) => (e.url ? unwrapPanoramaEmbedUrl(e.url) : null))
-    .find(Boolean) as string | undefined;
+  // Scene Builder also loads its assets through /proxy — same mothballing rule.
+  const sceneAssets = !captureAvailable
+    ? []
+    : (selectedEmbeds
+        .map((e) => {
+          const glb = e.url ? unwrapModel3dEmbedUrl(e.url) ?? unwrapRigEmbedUrl(e.url) : null;
+          return glb ? { id: e.id, url: glb, name: e.title } : null;
+        })
+        .filter(Boolean) as Array<{ id: string; url: string; name?: string }>);
+  const scenePanorama = !captureAvailable
+    ? undefined
+    : (selectedEmbeds.map((e) => (e.url ? unwrapPanoramaEmbedUrl(e.url) : null)).find(Boolean) as string | undefined);
 
   const openScene = async () => {
     await setSceneInputs({
@@ -523,7 +536,7 @@ export function HomeScreen({
 
       {!searching && !drill && (
         <button type="button" className="reset-link settings-link" onClick={onOpenSettings}>
-          ⚙ Curate models…
+          ⚙ Settings
         </button>
       )}
     </div>

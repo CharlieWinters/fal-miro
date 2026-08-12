@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   allCategories,
   allProviders,
@@ -7,14 +7,14 @@ import {
   type CatalogFilter,
 } from '../../shared/falCatalog';
 import { setCatalogFilter } from '../../shared/storage';
-import { getBackendConfig, setBackendConfig } from '../../shared/backendConfig';
-import { api, configureBackend, miroConnectUrl } from '../../lib/api';
+import { getConnectionConfig, setConnectionConfig } from '../../shared/backendConfig';
+import { configureConnection, type ConnectionConfig } from '../../lib/api';
 
 type SettingsScreenProps = {
-  /** True when no backend is configured yet — shows only the backend section
+  /** True when no backend is configured yet — shows only the connection section
    *  (no catalog curation, nothing to "go back" to) until it's saved. */
   forceBackendSetup?: boolean;
-  /** Fired after a successful backend save, so the app can leave setup mode. */
+  /** Fired after a successful save, so the app can leave setup mode. */
   onBackendConfigured?: () => void;
 };
 
@@ -33,66 +33,48 @@ export function SettingsScreen({ forceBackendSetup, onBackendConfigured }: Setti
   const [provs, setProvs] = useState<Set<string>>(() => new Set(current.providers ?? providers));
   const [note, setNote] = useState<string | null>(null);
 
-  const [backendUrlInput, setBackendUrlInput] = useState(() => getBackendConfig()?.url ?? '');
-  const [backendKeyInput, setBackendKeyInput] = useState(() => getBackendConfig()?.key ?? '');
-  const [backendNote, setBackendNote] = useState<string | null>(null);
-  const [miroNote, setMiroNote] = useState<string | null>(null);
-  const [miroStatus, setMiroStatus] = useState<'checking' | 'connected' | 'not-connected' | 'error'>('checking');
+  const savedConnection = getConnectionConfig();
+  // Backend mode is the recommended default for a fresh install — full
+  // feature set, and a browser-held key is the tradeoff-laden option, not
+  // the path of least resistance.
+  const [mode, setMode] = useState<'backend' | 'client'>(savedConnection?.mode ?? 'backend');
+  const [backendUrlInput, setBackendUrlInput] = useState(
+    () => (savedConnection?.mode === 'backend' ? savedConnection.url : '') ?? '',
+  );
+  const [backendKeyInput, setBackendKeyInput] = useState(
+    () => (savedConnection?.mode === 'backend' ? savedConnection.key : '') ?? '',
+  );
+  const [falKeyInput, setFalKeyInput] = useState(
+    () => (savedConnection?.mode === 'client' ? savedConnection.falKey : '') ?? '',
+  );
+  const [connectionNote, setConnectionNote] = useState<string | null>(null);
 
-  const checkMiroStatus = async () => {
-    setMiroStatus('checking');
-    try {
-      const { id } = await miro.board.getUserInfo();
-      const { connected } = await api.getMiroStatus(id);
-      setMiroStatus(connected ? 'connected' : 'not-connected');
-    } catch {
-      setMiroStatus('error');
-    }
-  };
-
-  useEffect(() => {
-    if (!forceBackendSetup) void checkMiroStatus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [forceBackendSetup]);
-
-  const saveBackend = () => {
-    const url = backendUrlInput.trim().replace(/\/+$/, '');
-    const key = backendKeyInput.trim();
-    if (!/^https?:\/\//.test(url)) {
-      setBackendNote('Backend URL must start with http:// or https://');
-      return;
-    }
-    if (!key) {
-      setBackendNote('Backend key is required.');
-      return;
-    }
-    setBackendConfig({ url, key });
-    configureBackend({ url, key });
-    setBackendNote('Saved.');
-    onBackendConfigured?.();
-  };
-
-  // Opens Miro's OAuth consent screen in a new tab — needed only for reading
-  // Doc-format item content (the Web SDK can't do that itself). There's no
-  // real callback signal from that tab back into this one, so this just
-  // polls the status endpoint a few times after opening it — good enough to
-  // catch "approved and came back" without the user having to manually hit
-  // a refresh button.
-  const connectMiro = async () => {
-    setMiroNote(null);
-    try {
-      const { id } = await miro.board.getUserInfo();
-      window.open(miroConnectUrl(id), '_blank');
-      setMiroNote('Opened Miro’s connect screen in a new tab — come back here once you’ve approved it.');
-      for (const delayMs of [3000, 3000, 4000, 5000]) {
-        await new Promise((r) => setTimeout(r, delayMs));
-        const { connected } = await api.getMiroStatus(id);
-        setMiroStatus(connected ? 'connected' : 'not-connected');
-        if (connected) break;
+  const saveConnection = () => {
+    let cfg: ConnectionConfig;
+    if (mode === 'backend') {
+      const url = backendUrlInput.trim().replace(/\/+$/, '');
+      const key = backendKeyInput.trim();
+      if (!/^https?:\/\//.test(url)) {
+        setConnectionNote('Backend URL must start with http:// or https://');
+        return;
       }
-    } catch (e) {
-      setMiroNote(e instanceof Error ? e.message : 'Failed to start the Miro connection.');
+      if (!key) {
+        setConnectionNote('Backend key is required.');
+        return;
+      }
+      cfg = { mode: 'backend', url, key };
+    } else {
+      const key = falKeyInput.trim();
+      if (!key) {
+        setConnectionNote('Fal API key is required.');
+        return;
+      }
+      cfg = { mode: 'client', falKey: key };
     }
+    setConnectionConfig(cfg);
+    configureConnection(cfg);
+    setConnectionNote('Saved.');
+    onBackendConfigured?.();
   };
 
   const toggle = (set: Set<string>, setSet: (s: Set<string>) => void, v: string) => {
@@ -126,77 +108,124 @@ export function SettingsScreen({ forceBackendSetup, onBackendConfigured }: Setti
   return (
     <div className="screen">
       <div className="hero">
-        <div className="title">{forceBackendSetup ? 'Connect your backend' : 'Backend connection'}</div>
+        <div className="title">Connection</div>
         <div className="sub">
-          {forceBackendSetup
-            ? 'No backend configured in this browser yet. Deploy your own (see the README’s ' +
-              '"Deploy your own backend" section) and paste its URL + key below.'
-            : 'The backend proxy you talk to — saved in this browser only. Other people on this ' +
-              'board may be using a different backend of their own; that’s expected.'}
+          How this panel reaches Fal. Saved in this browser only — other people on this board may
+          be connected their own way.
         </div>
       </div>
 
-      <label className="field">
-        <span>Backend URL</span>
-        <input
-          type="url"
-          placeholder="https://your-backend.example.com"
-          value={backendUrlInput}
-          onChange={(e) => {
-            setBackendUrlInput(e.target.value);
-            setBackendNote(null);
+      <div className="conn-mode">
+        <button
+          type="button"
+          className={`conn-card ${mode === 'client' ? 'selected' : ''}`}
+          onClick={() => {
+            setMode('client');
+            setConnectionNote(null);
           }}
-        />
-      </label>
-      <label className="field">
-        <span>Backend key</span>
-        <input
-          type="password"
-          placeholder="Matches BACKEND_KEY on your backend"
-          value={backendKeyInput}
-          onChange={(e) => {
-            setBackendKeyInput(e.target.value);
-            setBackendNote(null);
+        >
+          <span className="conn-radio">{mode === 'client' && <span className="conn-radio-dot" />}</span>
+          <span className="conn-card-text">
+            <span className="conn-card-title">Use your Fal key in this browser</span>
+            <span className="conn-card-sub">
+              Nothing to deploy. The key is stored here, so it's only as private as this browser.
+            </span>
+          </span>
+        </button>
+        <button
+          type="button"
+          className={`conn-card ${mode === 'backend' ? 'selected' : ''}`}
+          onClick={() => {
+            setMode('backend');
+            setConnectionNote(null);
           }}
-        />
-      </label>
-      <div style={{ display: 'flex', gap: 12 }}>
-        <button type="button" className="primary" onClick={saveBackend}>
-          Save backend
+        >
+          <span className="conn-radio">{mode === 'backend' && <span className="conn-radio-dot" />}</span>
+          <span className="conn-card-text">
+            <span className="conn-card-title">Deploy your own backend</span>
+            <span className="conn-card-sub">Your Fal key lives on a server you control. Full feature set.</span>
+          </span>
         </button>
       </div>
-      {backendNote && <div className="notice">{backendNote}</div>}
+
+      {mode === 'backend' ? (
+        <>
+          <label className="field">
+            <span>Backend URL</span>
+            <input
+              type="url"
+              placeholder="https://your-backend.example.com"
+              value={backendUrlInput}
+              onChange={(e) => {
+                setBackendUrlInput(e.target.value);
+                setConnectionNote(null);
+              }}
+            />
+          </label>
+          <label className="field">
+            <span>Backend key</span>
+            <input
+              type="password"
+              placeholder="Matches BACKEND_KEY on your backend"
+              value={backendKeyInput}
+              onChange={(e) => {
+                setBackendKeyInput(e.target.value);
+                setConnectionNote(null);
+              }}
+            />
+          </label>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button type="button" className="primary" onClick={saveConnection}>
+              Save backend
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="key-info">
+            <span className="key-info-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="3" y="11" width="18" height="10" rx="2" />
+                <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+              </svg>
+              Where the key lives
+            </span>
+            <span className="key-info-body">
+              Saved in this browser and sent straight to fal.ai. Anything with access to this
+              browser — devtools, an extension, someone using your machine — can read it, and it
+              isn't scoped or spend-limited the way a backend key is.
+            </span>
+            <span className="key-info-body muted">
+              Fine for solo use on your own device. On a shared or team machine, deploy a backend
+              instead.
+            </span>
+          </div>
+          <label className="field">
+            <span>Fal API key</span>
+            <input
+              type="password"
+              placeholder="fal-…"
+              value={falKeyInput}
+              onChange={(e) => {
+                setFalKeyInput(e.target.value);
+                setConnectionNote(null);
+              }}
+            />
+          </label>
+          <span className="key-info-hint">
+            Create one at fal.ai/dashboard/keys. Stored in this browser only — never sent to Miro.
+          </span>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button type="button" className="primary" onClick={saveConnection}>
+              Save key
+            </button>
+          </div>
+        </>
+      )}
+      {connectionNote && <div className="notice">{connectionNote}</div>}
 
       {!forceBackendSetup && (
         <>
-          <div className="hero">
-            <div className="title">Miro account</div>
-            <div className="sub">
-              Optional — connect your Miro account so the panel can read the text content of Doc
-              items on the board (e.g. as a prompt source), which isn’t something the board plugin
-              API can do on its own.
-            </div>
-          </div>
-          <div className="ref-hint">
-            {miroStatus === 'checking' && 'Checking connection…'}
-            {miroStatus === 'connected' && (
-              <>
-                <span className="check">✓</span> Connected
-              </>
-            )}
-            {miroStatus === 'not-connected' && 'Not connected.'}
-            {miroStatus === 'error' && 'Couldn’t check status — is the backend reachable?'}
-          </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button type="button" className="secondary" onClick={() => void connectMiro()}>
-              {miroStatus === 'connected' ? 'Reconnect Miro account' : 'Connect Miro account'}
-            </button>
-            <button type="button" className="reset-link" onClick={() => void checkMiroStatus()}>
-              Check status
-            </button>
-          </div>
-          {miroNote && <div className="notice">{miroNote}</div>}
-
           <div className="hero">
             <div className="title">Curate models</div>
             <div className="sub">Choose what shows in Browse. Applies to Category & Provider.</div>

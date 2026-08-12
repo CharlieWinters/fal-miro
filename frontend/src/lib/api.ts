@@ -1,36 +1,65 @@
-// Thin client for the fal-miro backend. The frontend never talks to Fal
-// directly — the FAL_KEY lives only on the backend.
+// Thin client for talking to Fal, in one of two connection modes:
 //
-// The backend's URL + shared secret are runtime-configurable (not baked in at
-// build time), set via configureBackend() — see shared/backendConfig.ts,
-// which loads them from board appData (the Settings screen) once at each
-// iframe's startup. This is what lets one shared, publicly-hosted frontend
-// build point at whichever backend a given board's owner deployed, with their
-// own FAL_KEY. VITE_API_BASE_URL / VITE_BACKEND_KEY are a fallback for local
-// dev convenience only — never used as a default in the public build (there's
-// no .env in that build), so an unconfigured board fails closed rather than
-// silently spending someone else's Fal credits.
+//   'backend' — the frontend never talks to Fal directly; FAL_KEY lives only
+//     on a backend the board owner deployed, and every call here proxies
+//     through it (see shared/backendConfig.ts). Full feature set.
+//   'client'  — the browser talks to Fal directly with a Fal API key stored
+//     in this browser's localStorage, using @fal-ai/client. Nothing to
+//     deploy, but the key is only as private as this browser (Fal's own
+//     docs recommend the backend-proxy pattern for anything beyond
+//     prototyping) — and a few backend-only things (credit balance, Miro Doc
+//     reading) simply aren't available in this mode.
+//
+// Mode + credentials are runtime-configurable (not baked in at build time),
+// set via configureConnection() once per iframe at startup. VITE_API_BASE_URL
+// / VITE_BACKEND_KEY are a fallback for local dev convenience only — never
+// used as a default in the public build, so an unconfigured board fails
+// closed rather than silently spending someone else's Fal credits.
+import { fal } from '@fal-ai/client';
+import { extractOutputUrls, normalizeStatus } from '../shared/falOutput';
 
-export type BackendConfig = { url: string; key: string };
+export type ConnectionConfig =
+  | { mode: 'backend'; url: string; key: string }
+  | { mode: 'client'; falKey: string };
 
-let runtimeConfig: BackendConfig | null = null;
+let runtimeConfig: ConnectionConfig | null = null;
 
 /** Called once per iframe at startup (see shared/backendConfig.ts). */
-export function configureBackend(cfg: BackendConfig | null): void {
-  runtimeConfig = cfg && cfg.url && cfg.key ? cfg : null;
+export function configureConnection(cfg: ConnectionConfig | null): void {
+  const valid: ConnectionConfig | null =
+    cfg?.mode === 'backend' && cfg.url && cfg.key
+      ? cfg
+      : cfg?.mode === 'client' && cfg.falKey
+        ? cfg
+        : null;
+  runtimeConfig = valid;
+  if (valid?.mode === 'client') fal.config({ credentials: valid.falKey });
+}
+
+export function connectionMode(): 'backend' | 'client' | null {
+  return runtimeConfig?.mode ?? null;
+}
+
+export function isConnectionConfigured(): boolean {
+  return runtimeConfig !== null;
 }
 
 function backendUrl(): string {
-  return runtimeConfig?.url || import.meta.env.VITE_API_BASE_URL || '';
+  return (runtimeConfig?.mode === 'backend' ? runtimeConfig.url : '') || import.meta.env.VITE_API_BASE_URL || '';
 }
 
 function backendKey(): string {
-  return runtimeConfig?.key || import.meta.env.VITE_BACKEND_KEY || '';
+  return (runtimeConfig?.mode === 'backend' ? runtimeConfig.key : '') || import.meta.env.VITE_BACKEND_KEY || '';
 }
 
-export function isBackendConfigured(): boolean {
-  return Boolean(backendUrl() && backendKey());
+function falKey(): string {
+  return runtimeConfig?.mode === 'client' ? runtimeConfig.falKey : '';
 }
+
+// Fal's Platform Models API — same base the backend proxies (see
+// backend/src/lib/env.ts's FAL_PLATFORM_API_BASE); hardcoded here since
+// client mode has no backend to source it from.
+const FAL_PLATFORM_API_BASE = 'https://api.fal.ai/v1';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const base = backendUrl();
@@ -51,6 +80,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     throw new Error(
       typeof data?.error === 'string' ? data.error : `${res.status} ${res.statusText}`,
+    );
+  }
+  return data as T;
+}
+
+/** A direct, unauthenticated-fallback GET against Fal's Platform API — used
+ *  by client mode's schema/models/pricing lookups, which have no backend to
+ *  proxy through. Includes the Fal key for higher rate limits, same as the
+ *  backend already does for these same endpoints. */
+async function clientFetchJson<T>(url: string): Promise<T> {
+  const key = falKey();
+  const res = await fetch(url, { headers: key ? { Authorization: `Key ${key}` } : {} });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    throw new Error(
+      typeof data?.error?.message === 'string' ? data.error.message : `${res.status} ${res.statusText}`,
     );
   }
   return data as T;
@@ -98,37 +144,138 @@ export type FalModelMeta = {
   thumbnailUrl: string | null;
 };
 
+// --- client-mode implementations: same contract as the backend routes
+// above, but talking to Fal directly via @fal-ai/client / its Platform API. ---
+
+async function clientRun(body: RunRequest): Promise<RunResponse> {
+  const { request_id } = await fal.queue.submit(body.endpointId, { input: body.input });
+  return { requestId: request_id, endpointId: body.endpointId, status: 'QUEUED' };
+}
+
+async function clientGetStatus(endpointId: string, requestId: string): Promise<StatusResponse> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const status: any = await fal.queue.status(endpointId, { requestId, logs: false });
+  const normalized = normalizeStatus(status?.status);
+  const queuePosition = typeof status?.queue_position === 'number' ? status.queue_position : null;
+  if (normalized !== 'SUCCEEDED') {
+    return { requestId, endpointId, status: normalized, queuePosition };
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result: any = await fal.queue.result(endpointId, { requestId });
+  const data = result?.data ?? result ?? {};
+  return { requestId, endpointId, status: 'SUCCEEDED', output: extractOutputUrls(data), data };
+}
+
+async function clientCancel(endpointId: string, requestId: string): Promise<{ ok: true }> {
+  await fal.queue.cancel(endpointId, { requestId });
+  return { ok: true };
+}
+
+async function clientGetSchema(endpointId: string): Promise<SchemaResponse> {
+  const url = `${FAL_PLATFORM_API_BASE}/models?endpoint_id=${encodeURIComponent(endpointId)}&expand=openapi-3.0`;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const payload: any = await clientFetchJson(url);
+  const model = Array.isArray(payload.models) ? payload.models[0] : undefined;
+  if (!model) throw new Error(`No model found for endpoint_id "${endpointId}"`);
+  const openapi = model.openapi && !model.openapi.error ? model.openapi : null;
+  if (!openapi) throw new Error(model.openapi?.error?.message ?? 'OpenAPI expansion unavailable for this model');
+  return { endpointId: model.endpoint_id, metadata: model.metadata ?? null, openapi };
+}
+
+async function clientGetModels(): Promise<{ models: FalModelMeta[]; count: number; cachedAt: number }> {
+  const all: FalModelMeta[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < 50; page++) {
+    const url = new URL(`${FAL_PLATFORM_API_BASE}/models`);
+    url.searchParams.set('limit', '100');
+    if (cursor) url.searchParams.set('cursor', cursor);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const payload: any = await clientFetchJson(url.toString());
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const models: any[] = Array.isArray(payload?.models) ? payload.models : [];
+    for (const m of models) {
+      const meta = m?.metadata ?? {};
+      const endpointId = m?.endpoint_id ?? meta.endpoint_id ?? null;
+      if (!endpointId) continue;
+      all.push({
+        endpointId,
+        displayName: typeof meta.display_name === 'string' ? meta.display_name : null,
+        category: typeof meta.category === 'string' ? meta.category : null,
+        tags: Array.isArray(meta.tags) ? meta.tags.filter((t: unknown) => typeof t === 'string') : [],
+        status: typeof meta.status === 'string' ? meta.status : null,
+        thumbnailUrl: typeof meta.thumbnail_url === 'string' ? meta.thumbnail_url : null,
+      });
+    }
+    if (!payload?.has_more || !payload?.next_cursor) break;
+    cursor = payload.next_cursor;
+  }
+  return { models: all, count: all.length, cachedAt: Date.now() };
+}
+
+async function clientEstimate(
+  endpointId: string,
+  units: number,
+  seconds?: number,
+): Promise<{ costUSD: number | null; unit: string | null; unitPrice?: number; units?: number; perSecond?: boolean }> {
+  const url = `${FAL_PLATFORM_API_BASE}/models/pricing?endpoint_id=${encodeURIComponent(endpointId)}`;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const payload: any = await clientFetchJson(url);
+  const price = Array.isArray(payload?.prices) ? payload.prices[0] : null;
+  if (!price || typeof price.unit_price !== 'number') return { costUSD: null, unit: price?.unit ?? null };
+  const unit = typeof price.unit === 'string' ? price.unit : null;
+  const perSecond = unit ? /second/i.test(unit) : false;
+  const billedUnits = perSecond && seconds ? seconds : units;
+  return {
+    costUSD: Number((price.unit_price * billedUnits).toFixed(4)),
+    unit,
+    unitPrice: price.unit_price,
+    units: billedUnits,
+    perSecond,
+  };
+}
+
+const isClient = () => connectionMode() === 'client';
+
 export const api = {
   /** Submit a model run to Fal's queue. Returns immediately with a requestId. */
   run: (body: RunRequest) =>
-    request<RunResponse>('/api/fal/run', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
+    isClient()
+      ? clientRun(body)
+      : request<RunResponse>('/api/fal/run', { method: 'POST', body: JSON.stringify(body) }),
 
   /** Poll a request. On SUCCEEDED the response also carries output + data. */
   getStatus: (endpointId: string, requestId: string) =>
-    request<StatusResponse>(
-      `/api/fal/status/${requestId}?endpointId=${encodeURIComponent(endpointId)}`,
-    ),
+    isClient()
+      ? clientGetStatus(endpointId, requestId)
+      : request<StatusResponse>(`/api/fal/status/${requestId}?endpointId=${encodeURIComponent(endpointId)}`),
 
   /** Cancel an in-flight request. */
   cancel: (endpointId: string, requestId: string) =>
-    request<{ ok: true }>(
-      `/api/fal/cancel/${requestId}?endpointId=${encodeURIComponent(endpointId)}`,
-      { method: 'POST' },
-    ),
+    isClient()
+      ? clientCancel(endpointId, requestId)
+      : request<{ ok: true }>(
+          `/api/fal/cancel/${requestId}?endpointId=${encodeURIComponent(endpointId)}`,
+          { method: 'POST' },
+        ),
 
   /** Fetch a model's OpenAPI 3.0 schema (drives the generic form). */
   getSchema: (endpointId: string) =>
-    request<SchemaResponse>(`/api/fal/schema?endpointId=${encodeURIComponent(endpointId)}`),
+    isClient()
+      ? clientGetSchema(endpointId)
+      : request<SchemaResponse>(`/api/fal/schema?endpointId=${encodeURIComponent(endpointId)}`),
 
   /** Discovery: every Fal model + its metadata (category, tags, thumbnail…). */
   getModels: () =>
-    request<{ models: FalModelMeta[]; count: number; cachedAt: number }>('/api/fal/models'),
+    isClient()
+      ? clientGetModels()
+      : request<{ models: FalModelMeta[]; count: number; cachedAt: number }>('/api/fal/models'),
 
-  /** Account credit balance (powers the credits badge). */
-  getBalance: () => request<{ balance: number | null; currency: string }>('/api/fal/balance'),
+  /** Account credit balance (powers the credits badge) — backend-only: needs
+   *  ADMIN_KEY, a more sensitive key than the one client mode already holds. */
+  getBalance: (): Promise<{ balance: number | null; currency: string }> =>
+    isClient()
+      ? Promise.reject(new Error('Credit balance requires backend mode.'))
+      : request('/api/fal/balance'),
 
   /**
    * Best-effort cost estimate: unit price × billing units. For time-billed
@@ -136,16 +283,18 @@ export const api = {
    * the backend bills on that instead of `units`.
    */
   estimate: (endpointId: string, units: number, seconds?: number) =>
-    request<{
-      costUSD: number | null;
-      unit: string | null;
-      unitPrice?: number;
-      units?: number;
-      perSecond?: boolean;
-    }>(
-      `/api/fal/estimate?endpointId=${encodeURIComponent(endpointId)}&units=${units}` +
-        (seconds && seconds > 0 ? `&seconds=${seconds}` : ''),
-    ),
+    isClient()
+      ? clientEstimate(endpointId, units, seconds)
+      : request<{
+          costUSD: number | null;
+          unit: string | null;
+          unitPrice?: number;
+          units?: number;
+          perSecond?: boolean;
+        }>(
+          `/api/fal/estimate?endpointId=${encodeURIComponent(endpointId)}&units=${units}` +
+            (seconds && seconds > 0 ? `&seconds=${seconds}` : ''),
+        ),
 
   /**
    * Read a Doc-format item's text content — the one thing the Web SDK can't

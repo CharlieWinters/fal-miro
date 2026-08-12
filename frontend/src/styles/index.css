@@ -103,13 +103,154 @@ body {
 }
 
 .credits {
-  margin-left: auto;
   font: 600 12px 'Roobert PRO', system-ui, sans-serif;
   color: var(--ok);
   background: rgba(110, 219, 140, 0.12);
   border: 1px solid rgba(110, 219, 140, 0.28);
   border-radius: var(--radius-pill);
   padding: 3px 10px;
+}
+
+/* Client-mode credits badge: "$?" placeholder + hover explanation, since
+   there's no backend to ask for the real balance. */
+.credits-wrap {
+  margin-left: auto;
+  position: relative;
+  display: flex;
+}
+.credits-unknown {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border-strong);
+  cursor: help;
+}
+/* Invisible bridge from the badge down to the visible box below — the gap
+   has to be part of *this* element's hoverable area (padding-top, not a
+   `top` offset) or the mouse "leaves" .credits-wrap while crossing it and
+   the tooltip closes before it can be reached. */
+.credits-tip {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  width: 236px;
+  padding-top: 8px;
+  z-index: 5;
+}
+.credits-tip-box {
+  background: var(--card-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  font: 400 11.5px/1.5 'Roobert PRO', system-ui, sans-serif;
+  color: var(--fg-2);
+}
+.credits-tip-link {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font: 600 11.5px 'Roobert PRO', system-ui, sans-serif;
+  cursor: pointer;
+}
+
+/* Connection mode picker (Settings) — stacked radio cards, not tabs: at panel
+   width the browser-key tradeoff needs a full line of copy to be read rather
+   than skipped. */
+.conn-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.conn-card {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: var(--radius-card);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: border-color 140ms var(--ease), background 140ms var(--ease);
+}
+.conn-card:hover {
+  border-color: var(--border-strong);
+}
+.conn-card.selected {
+  box-shadow: inset 0 0 0 1px rgba(255, 221, 51, 0.55);
+  background: rgba(255, 221, 51, 0.05);
+}
+.conn-radio {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.conn-radio-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.conn-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.conn-card-title {
+  font: 600 13px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--fg);
+}
+.conn-card-sub {
+  font: 500 11px/1.45 'Roobert PRO', system-ui, sans-serif;
+  color: var(--muted);
+}
+
+/* "Where the key lives" info card (client mode). */
+.key-info {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.key-info-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: 600 12px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--fg);
+}
+.key-info-title svg {
+  color: var(--accent);
+}
+.key-info-body {
+  font: 400 12px/1.55 'Roobert PRO', system-ui, sans-serif;
+  color: var(--fg-2);
+}
+.key-info-body.muted {
+  color: var(--muted);
+}
+.key-info-hint {
+  font: 400 11px/1.5 'Roobert PRO', system-ui, sans-serif;
+  color: var(--muted-2);
 }
 
 .screen {

@@ -1,21 +1,30 @@
-// The backend URL + shared secret live in this browser's localStorage — not
-// board appData. This is deliberately per-person, not per-board: different
-// people collaborating on the very same board may each be running their own
-// self-hosted backend (own FAL_KEY), so a board-level setting would wrongly
+// How this panel reaches Fal — either a self-hosted backend (URL + shared
+// secret) or a Fal API key used directly from the browser — lives in this
+// browser's localStorage, not board appData. This is deliberately per-person,
+// not per-board: different people collaborating on the very same board may
+// each be connected their own way, so a board-level setting would wrongly
 // force them to share one. Each of the three iframes (headless, panel, modal)
 // loads this once at startup — see headless/index.ts, panel/App.tsx,
-// modal/App.tsx — before doing anything that talks to the backend.
-import { configureBackend, type BackendConfig } from '../lib/api';
+// modal/App.tsx — before doing anything that talks to Fal.
+import { configureConnection, type ConnectionConfig } from '../lib/api';
 
 const STORAGE_KEY = 'fal:backendConfig';
 
-export function getBackendConfig(): BackendConfig | null {
+export function getConnectionConfig(): ConnectionConfig | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed.url === 'string' && typeof parsed.key === 'string') {
-      return parsed as BackendConfig;
+    if (parsed?.mode === 'backend' && typeof parsed.url === 'string' && typeof parsed.key === 'string') {
+      return parsed as ConnectionConfig;
+    }
+    if (parsed?.mode === 'client' && typeof parsed.falKey === 'string') {
+      return parsed as ConnectionConfig;
+    }
+    // Pre-mode shape (before backend/client became an explicit choice) — treat
+    // it as backend mode, the only mode that used to exist.
+    if (typeof parsed?.url === 'string' && typeof parsed?.key === 'string') {
+      return { mode: 'backend', url: parsed.url, key: parsed.key };
     }
   } catch (e) {
     console.warn('[backendConfig] failed to read localStorage:', e);
@@ -23,15 +32,15 @@ export function getBackendConfig(): BackendConfig | null {
   return null;
 }
 
-export function setBackendConfig(cfg: BackendConfig): void {
+export function setConnectionConfig(cfg: ConnectionConfig): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
 }
 
-/** Loads this browser's backend config into api.ts. Returns whether one was set. */
+/** Loads this browser's connection config into api.ts. Returns whether one was set. */
 export function loadBackendConfig(): boolean {
-  const cfg = getBackendConfig();
-  configureBackend(cfg);
-  return Boolean(cfg?.url && cfg?.key);
+  const cfg = getConnectionConfig();
+  configureConnection(cfg);
+  return cfg !== null;
 }
 
 /**
