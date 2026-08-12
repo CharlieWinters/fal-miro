@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fal for Miro — Video</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; }
+    video { width: 100%; height: 100%; object-fit: contain; display: block; }
+  </style>
+</head>
+<body>
+  <!--
+    Miro has no native video widget, but its embed widget renders any
+    iframable URL — this static page is what those embeds point at. Ships
+    with the frontend build (no backend involved): the ?url= param is a
+    plain Fal CDN URL, played back directly, no proxy needed.
+
+    See src/lib/api.ts's videoEmbedUrl() for how this URL gets built.
+  -->
+  <video id="player" controls autoplay muted loop playsinline></video>
+  <script>
+    const url = new URLSearchParams(window.location.search).get('url');
+    if (url && /^https?:\/\//.test(url)) {
+      document.getElementById('player').src = url;
+    } else {
+      document.body.textContent = 'Missing or invalid url';
+    }
+  </script>
+</body>
+</html>

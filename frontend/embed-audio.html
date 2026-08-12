@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fal for Miro — Audio</title>
+  <style>
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: #141417;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 18px;
+      box-sizing: border-box;
+      font-family: system-ui, sans-serif;
+    }
+    .badge {
+      flex: 0 0 auto;
+      width: 44px;
+      height: 44px;
+      border-radius: 11px;
+      background: rgba(255, 221, 51, 0.14);
+      border: 1px solid rgba(255, 221, 51, 0.4);
+      color: #FFDD33;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+    }
+    audio { flex: 1 1 auto; width: 100%; height: 40px; }
+  </style>
+</head>
+<body>
+  <!-- See embed-video.html for why this is a static page. -->
+  <div class="badge">&#9835;</div>
+  <audio id="player" controls preload="metadata"></audio>
+  <script>
+    const url = new URLSearchParams(window.location.search).get('url');
+    if (url && /^https?:\/\//.test(url)) {
+      document.getElementById('player').src = url;
+    } else {
+      document.body.textContent = 'Missing or invalid url';
+    }
+  </script>
+</body>
+</html>

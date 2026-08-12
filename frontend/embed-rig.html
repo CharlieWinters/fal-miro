@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fal for Miro — Rig</title>
+  <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; background: #14142b; }
+    model-viewer { width: 100%; height: 100%; --poster-color: #14142b; }
+  </style>
+</head>
+<body>
+  <!-- Static page (see embed-video.html). Meshy rigging returns an animated
+       .glb (mesh + skeletal clip) — autoplay so the character animates on
+       the board, camera-controls to orbit it. -->
+  <model-viewer id="viewer" autoplay camera-controls touch-action="pan-y" shadow-intensity="1" exposure="1" environment-image="neutral"></model-viewer>
+  <script>
+    const url = new URLSearchParams(window.location.search).get('url');
+    if (url && /^https?:\/\//.test(url)) {
+      document.getElementById('viewer').src = url;
+    } else {
+      document.body.textContent = 'Missing or invalid url';
+    }
+  </script>
+</body>
+</html>

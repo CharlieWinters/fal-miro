@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fal for Miro — Panorama</title>
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #14142b; }
+    a-scene { width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <!--
+    Static page (see embed-video.html). Image-to-panorama (Hunyuan World)
+    returns an equirectangular 2:1 image; mapped onto the inside of a sphere
+    so the board shows an interactive photosphere — drag to look around.
+
+    crossorigin="anonymous" + Fal's CDN sending Access-Control-Allow-Origin
+    is what lets A-Frame use this as a WebGL texture without the browser
+    refusing it — verified live (canvas readback un-tainted) before cutting
+    the previous backend /proxy dependency for this page.
+  -->
+  <a-scene embedded vr-mode-ui="enabled: false" loading-screen="enabled: false" cursor="rayOrigin: mouse">
+    <a-assets>
+      <img id="pano" crossorigin="anonymous" />
+    </a-assets>
+    <a-sky src="#pano"></a-sky>
+  </a-scene>
+  <script>
+    const url = new URLSearchParams(window.location.search).get('url');
+    if (url && /^https?:\/\//.test(url)) {
+      document.getElementById('pano').src = url;
+    } else {
+      document.body.textContent = 'Missing or invalid url';
+    }
+  </script>
+</body>
+</html>
