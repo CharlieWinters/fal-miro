@@ -15,6 +15,7 @@ import { CreditsBadge } from './CreditsBadge';
 import {
   applyFavourites,
   familyByKey,
+  findModel,
   isReferenceToVideo,
   mergeSyncedCatalog,
   setActiveCatalogFilter,
@@ -24,6 +25,9 @@ import {
   type ModelFamily,
 } from '../shared/falCatalog';
 import { getCatalogFilter, getFavourites } from '../shared/storage';
+import { getConnectedResources, getParentFrameId } from '../shared/boardHelpers';
+import { buildRecipeSeed, type RecipeCard, type RecipeSeed } from '../shared/recipeCard';
+import { loadBackendConfig } from '../shared/backendConfig';
 import { api } from '../lib/api';
 import '../styles/index.css';
 
@@ -60,10 +64,14 @@ function usesSchemaScreen(model: FalModel): boolean {
   );
 }
 
-/** Pick the screen for the selected model (mutually exclusive). */
-function ModelScreen({ model }: { model: FalModel }) {
-  if (model.screen === 'generic') return <GenericModelScreen model={model} />;
-  if (isReferenceToVideo(model)) return <ReferenceToVideoScreen model={model} />;
+/**
+ * Pick the screen for the selected model (mutually exclusive). `seed` is only
+ * meaningful for the two schema-driven screens — a settings card can only have
+ * been saved from one of those, so reopening always routes back to one of them.
+ */
+function ModelScreen({ model, seed }: { model: FalModel; seed?: RecipeSeed | null }) {
+  if (model.screen === 'generic') return <GenericModelScreen model={model} seed={seed} />;
+  if (isReferenceToVideo(model)) return <ReferenceToVideoScreen model={model} seed={seed} />;
   if (isFirstLast(model)) return <FirstLastVideoScreen model={model} />;
   if (model.capability === 'rig') return <RiggingScreen model={model} />;
   if (model.capability === 'sound') return <SoundScreen model={model} />;
@@ -74,10 +82,10 @@ function ModelScreen({ model }: { model: FalModel }) {
       <MergeVideosScreen model={model} />
     );
   }
-  if (usesSchemaScreen(model)) return <ImageGenScreen model={model} />;
+  if (usesSchemaScreen(model)) return <ImageGenScreen model={model} seed={seed} />;
   // Any other capability (audio, music, or a future/auto-synced model) runs
   // through the generic schema-driven screen.
-  return <GenericModelScreen model={model} />;
+  return <GenericModelScreen model={model} seed={seed} />;
 }
 
 /**
@@ -85,7 +93,7 @@ function ModelScreen({ model }: { model: FalModel }) {
  * selected task's screen rendered below. Single-task families never reach here
  * (App jumps straight to the task).
  */
-function FamilyScreen({ family }: { family: ModelFamily }) {
+function FamilyScreen({ family, seed }: { family: ModelFamily; seed?: RecipeSeed | null }) {
   const [idx, setIdx] = useState(0);
   const task = family.tasks[idx] ?? family.tasks[0];
 
@@ -103,7 +111,7 @@ function FamilyScreen({ family }: { family: ModelFamily }) {
           </select>
         </label>
       )}
-      <ModelScreen model={task} />
+      <ModelScreen model={task} seed={seed} />
     </div>
   );
 }
@@ -112,10 +120,18 @@ function App() {
   const [family, setFamily] = useState<ModelFamily | null>(null);
   const [model, setModel] = useState<FalModel | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [recipeSeed, setRecipeSeed] = useState<RecipeSeed | null>(null);
+  // Reading localStorage is synchronous, so this is known on first render —
+  // false forces the settings screen (nothing else can run without a
+  // backend); no public default, so an unconfigured install fails closed
+  // instead of silently spending whoever's Fal credits happened to be baked
+  // into a shared build.
+  const [backendReady, setBackendReady] = useState<boolean>(() => loadBackendConfig());
 
   // Load the persisted curation filter, then sync the full model catalog from
   // fal metadata (merged over the hand list). Both push into the live catalog.
   useEffect(() => {
+    if (!backendReady) return;
     getCatalogFilter()
       .then(setActiveCatalogFilter)
       .catch((e) => console.warn('[App] loading catalog filter failed', e));
@@ -126,7 +142,7 @@ function App() {
     getFavourites()
       .then(applyFavourites)
       .catch((e) => console.warn('[App] loading favourites failed', e));
-  }, []);
+  }, [backendReady]);
 
   // Browse selects a family; single-task families jump straight to the task.
   const selectFamily = (key: string) => {
@@ -145,7 +161,43 @@ function App() {
     setModel(null);
     setFamily(null);
     setShowSettings(false);
+    setRecipeSeed(null);
   };
+
+  // Explicit reopen trigger (the "For your selection" ToolCard on a settings
+  // card) — resolve what's currently connected to the card, build a seed from
+  // it + the card's saved static input, and jump to the model's real screen.
+  // Falls back to a minimal synthetic model if the catalog can't resolve the
+  // endpoint (e.g. a long-tail synced model not yet loaded this session).
+  const openRecipe = async (recipe: RecipeCard, cardId: string) => {
+    const target =
+      findModel(recipe.endpointId) ??
+      ({
+        endpointId: recipe.endpointId,
+        label: recipe.endpointId.replace(/^fal-ai\//, ''),
+        capability: recipe.capability,
+      } as FalModel);
+    const [connected, frameId] = await Promise.all([getConnectedResources(cardId), getParentFrameId(cardId)]);
+    setRecipeSeed(buildRecipeSeed(recipe, cardId, connected, frameId));
+    setFamily(null);
+    setModel(target);
+  };
+
+  // No backend configured in this browser yet — the only thing this iframe
+  // can do is let the user set one. No back button: there's nowhere to go.
+  if (!backendReady) {
+    return (
+      <div className="app">
+        <div className="topbar">
+          <span className="brand">fal</span>
+          <span className="brand-sub">for Miro</span>
+        </div>
+        <div className="content">
+          <SettingsScreen forceBackendSetup onBackendConfigured={() => setBackendReady(true)} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -164,11 +216,11 @@ function App() {
         <ActiveJobsTray />
 
         {showSettings ? (
-          <SettingsScreen />
+          <SettingsScreen onBackendConfigured={() => setBackendReady(true)} />
         ) : model ? (
-          <ModelScreen model={model} />
+          <ModelScreen model={model} seed={recipeSeed} />
         ) : family ? (
-          <FamilyScreen key={family.key} family={family} />
+          <FamilyScreen key={family.key} family={family} seed={recipeSeed} />
         ) : (
           <HomeScreen
             onSelectFamily={selectFamily}
@@ -176,6 +228,7 @@ function App() {
             onOpenTool={openCaptureModal}
             onOpenScene={openSceneModal}
             onOpenSettings={() => setShowSettings(true)}
+            onOpenRecipe={(recipe, cardId) => void openRecipe(recipe, cardId)}
           />
         )}
       </div>

@@ -245,6 +245,11 @@ export async function setAssetNamingConfig(cfg: AssetNamingConfig): Promise<void
   );
 }
 
+// Backend connection (URL + shared secret) deliberately does NOT live here —
+// see shared/backendConfig.ts. It's per-person (localStorage), not per-board:
+// different people collaborating on the very same board may each be running
+// their own self-hosted backend with their own FAL_KEY.
+
 // ---------------------------------------------------------------------------
 // Catalog curation filter — which providers/categories the board shows. See
 // falCatalog CatalogFilter (null = all). Small payload; lives in appData.

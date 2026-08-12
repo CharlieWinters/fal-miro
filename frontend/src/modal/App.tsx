@@ -5,6 +5,7 @@ import { PanoramaToImageScreen } from '../panel/screens/PanoramaToImageScreen';
 import { RigPoseScreen } from '../panel/screens/RigPoseScreen';
 import { BonePoseScreen } from '../panel/screens/BonePoseScreen';
 import { SceneBuilderScreen } from '../panel/screens/SceneBuilderScreen';
+import { loadBackendConfig } from '../shared/backendConfig';
 import '../styles/index.css';
 
 /**
@@ -50,4 +51,13 @@ function ModalApp() {
 }
 
 const root = document.getElementById('root');
-if (root) createRoot(root).render(<ModalApp />);
+if (root) {
+  // The panel is where a backend gets configured in the first place, so by
+  // the time a capture tool opens this modal it's already set in this
+  // browser's localStorage — just load it into this iframe's own copy of
+  // api.ts before rendering.
+  loadBackendConfig();
+  createRoot(root).render(<ModalApp />);
+} else {
+  console.error('Modal: #root not found');
+}

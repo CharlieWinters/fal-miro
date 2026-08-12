@@ -16,10 +16,11 @@ ElevenLabs integrations. See `ARCHITECTURE.md`.
 ```
 fal-miro/
   backend/           Hono proxy — FAL_KEY lives here only, deploy it anywhere
-    src/app.ts       Routes/logic, runtime-agnostic (/healthz, /api/fal/*, /embed/*, /proxy)
+    src/app.ts       Routes/logic, runtime-agnostic (/healthz, /api/fal/*, /proxy)
     src/node.ts      Node entrypoint (npm run dev / start)
     src/worker.ts    Cloudflare Workers entrypoint (npm run dev:worker / deploy:worker)
   frontend/          Vite + React, three iframes (headless / panel / modal)
+    embed-*.html     Static video/audio/3d/rig/panorama viewers — no backend needed
     src/shared/      messageTypes, falCatalog (stub), agentRegistry (empty)
     src/lib/api.ts   Fal backend client
 ```
@@ -40,7 +41,7 @@ Frontend:
 
 ```bash
 cd frontend
-cp .env.example .env        # VITE_API_BASE_URL=http://localhost:8789
+cp .env.example .env        # VITE_API_BASE_URL=http://localhost:8789, VITE_BACKEND_KEY=<your local BACKEND_KEY>
 npm install
 npm run dev                 # http://localhost:5175
 npm run lint                # tsc --noEmit (type-check)
@@ -69,7 +70,9 @@ curl "localhost:8789/api/fal/status/<requestId>?endpointId=fal-ai/flux/dev"
 
 ## Deploy your own backend
 
-The backend is a small [Hono](https://hono.dev) app (`backend/src/app.ts`) with your `FAL_KEY` as its only real dependency — deploy it wherever you like, then point the frontend's `VITE_API_BASE_URL` at it.
+The backend is a small [Hono](https://hono.dev) app (`backend/src/app.ts`) with your `FAL_KEY` as its only real dependency — deploy it wherever you like. The frontend build is shared/public and has **no default backend baked in** — each board points itself at your deployment via the panel's Settings screen (see below), not a build-time env var.
+
+Every deployment also needs a **`BACKEND_KEY`** — any random string you generate yourself (e.g. `openssl rand -hex 32`). The frontend sends it back as the `x-fal-proxy-key` header on every `/api/fal/*` call; without a match, the backend rejects the request. This is what stops anyone who finds your deployed URL from spending your `FAL_KEY` credits — CORS alone doesn't (it only stops a *browser* reading a disallowed origin's response, not a direct request from reaching the backend at all).
 
 ### Cloudflare Workers (recommended — free, zero idle cost)
 
@@ -79,6 +82,7 @@ npm install
 wrangler login                       # one-time
 wrangler secret put FAL_KEY          # paste your key
 wrangler secret put ADMIN_KEY        # optional — powers the credits badge + raises /models rate limits
+wrangler secret put BACKEND_KEY      # any random string — required
 npm run deploy:worker
 ```
 
@@ -86,16 +90,13 @@ npm run deploy:worker
 
 ### Node (Docker / Fly / Railway / any VM)
 
-Same `npm install` + `npm run dev` / `start` as local dev above — any host that can run a long-lived Node process works unchanged. Set `FAL_KEY`, `ADMIN_KEY`, `ALLOWED_ORIGINS`, and `PORT` as environment variables on that host.
+Same `npm install` + `npm run dev` / `start` as local dev above — any host that can run a long-lived Node process works unchanged. Set `FAL_KEY`, `ADMIN_KEY`, `BACKEND_KEY`, `ALLOWED_ORIGINS`, and `PORT` as environment variables on that host.
 
-### Either way
+### Either way — point your board at it
 
-Point the frontend at it:
+Open the panel in Miro → it'll force you into **Settings** until a backend is configured (or use the gear icon later to change it) → paste your backend's URL and the `BACKEND_KEY` you set. This is saved in **your own browser's `localStorage`**, not the board — it's per-person, not per-board or per-team. Different people working on the very same board may each be running their own backend with their own `FAL_KEY`, and that's expected; there's no shared/global default for anyone who installs the app.
 
-```
-# frontend/.env
-VITE_API_BASE_URL=https://your-deployed-backend
-```
+For local dev only, `frontend/.env`'s `VITE_API_BASE_URL` / `VITE_BACKEND_KEY` act as a fallback so you don't have to click through Settings every time you restart the dev server — these are never used in the public build.
 
 ## Done so far
 

@@ -17,6 +17,25 @@ Cross-frame contract: `src/shared/messageTypes.ts`. The panel calls
 headless iframe (`src/headless/communications.ts`) dispatches to the registered
 agent and broadcasts `AGENT_UPDATE` progress back.
 
+### Embed pages — a fourth, Miro-SDK-free surface
+
+`embed-video.html`, `embed-audio.html`, `embed-3d.html`, `embed-rig.html`,
+`embed-panorama.html` (project root, alongside `index.html`/`app.html`/
+`modal.html`) are what Miro's embed widget iframes when a generation finishes,
+since Miro has no native video/3D/panorama widget — a `<video>`/`<audio>`/
+`<model-viewer>`/A-Frame `<a-sky>` page that reads a `?url=` query param and
+plays/renders it. Built by `src/lib/api.ts`'s `videoEmbedUrl()` etc.
+
+Unlike the three iframes above, these load **no Miro SDK and talk to no
+backend** — every board viewer's browser loads the media straight from Fal's
+CDN. That's true even for panorama's WebGL sky texture, which needs a
+CORS-clean load: Fal's CDN sends `Access-Control-Allow-Origin` (verified live,
+including a canvas-readback check that it isn't tainted), so
+`crossorigin="anonymous"` on the `<img>` is enough — no proxy required. That
+makes all five genuinely generic: they render identically regardless of which
+backend (if any) a given board is using, which matters once boards can each
+point at their own self-hosted backend (see below).
+
 ## Backend (the part this scaffold fully implements)
 
 A small [Hono](https://hono.dev) app in `backend/src/app.ts`. The `FAL_KEY`
@@ -31,9 +50,20 @@ for the two paths. Env vars are read per-request via `hono/adapter`'s
 than once at module load, since Workers only exposes bindings on the request
 context.
 
+**Auth:** every `/api/fal/*` route requires an `x-fal-proxy-key` header
+matching the deployment's `BACKEND_KEY` secret — checked by middleware in
+`app.ts`, fails closed (500) if `BACKEND_KEY` isn't set at all. This exists
+because CORS' `Access-Control-Allow-Origin` only stops a *browser* from
+reading a disallowed origin's response; it does nothing to stop a direct
+`curl`/script call from reaching these routes and spending the deployment's
+`FAL_KEY` credits. `/proxy` is exempt from this check (loaded via `<img>`/
+`<video>` `src`, which can't attach a custom header); it's instead restricted
+to only fetch `fal.media` hostnames, so it can't be abused as a
+general-purpose open relay for arbitrary URLs.
+
 | Method | Path                          | What |
 | ------ | ----------------------------- | --- |
-| GET    | `/healthz`                    | Liveness + whether a key is configured. |
+| GET    | `/healthz`                    | Liveness + whether a key is configured. Unauthenticated. |
 | POST   | `/api/fal/run`                | `{ endpointId, input }` → `fal.queue.submit` → `{ requestId }`. Returns immediately. |
 | GET    | `/api/fal/status/:requestId`  | `?endpointId=…`. Wraps `fal.queue.status`; on completion also calls `fal.queue.result` and returns `{ status, output[], data }`. |
 | POST   | `/api/fal/cancel/:requestId`  | `?endpointId=…`. Wraps `fal.queue.cancel`. |
@@ -41,12 +71,45 @@ context.
 | GET    | `/api/fal/models`             | Paginated Fal model catalog with `{ category, tags, displayName, thumbnailUrl }` per endpoint; in-memory 1h TTL cache, `?refresh=1` to bypass. |
 | GET    | `/api/fal/balance`            | `account/billing?expand=credits` via `ADMIN_KEY` — powers the credits badge. |
 | GET    | `/api/fal/estimate`           | `?endpointId=…&units=…&seconds=…` → unit price × units (or × elapsed seconds for time-billed models) → `{ costUSD }`. |
-| GET    | `/embed/video`, `/embed/audio`, `/embed/3d`, `/embed/rig`, `/embed/panorama` | `?url=…`. Tiny HTML players (`<video>`/`<audio>`/`<model-viewer>`/A-Frame `<a-sky>`) that Miro's embed widget iframes, since Miro has no native video/3D/panorama widget. |
-| GET    | `/proxy`                      | `?url=…`. Streams a remote asset back with CORS + `Range` headers (fetch()-based, so it runs unchanged on Node or Workers) — needed wherever a `<model-viewer>`/`<video crossorigin>` snapshot would otherwise taint the canvas on Fal's CORS-less CDN. |
+| GET    | `/proxy`                      | `?url=…`. Streams a remote asset back with CORS + `Range` headers (fetch()-based, so it runs unchanged on Node or Workers) — used by the modal's capture-to-image tools so a `<model-viewer>`/`<video crossorigin>` snapshot doesn't taint the canvas. Unauthenticated, host-restricted (see above). |
+
+`/embed/video`, `/embed/audio`, `/embed/3d`, `/embed/rig`, `/embed/panorama`
+**used to be backend routes here** — they're now static pages shipped with the
+frontend (see below); this backend no longer serves them at all.
 
 Output extraction is best-effort: `output[]` pulls primary media URLs
 (`images[].url`, `video.url`, `audio.url`, …) out of the model-specific result,
 while `data` always carries the full untouched payload.
+
+### Frontend ↔ backend: which backend, and how it's authenticated
+
+The frontend build has no backend baked in at build time. `frontend/src/lib/api.ts`
+holds a runtime-settable `{ url, key }` pair (`configureBackend()`); every
+`/api/fal/*` call sends `key` back as `x-fal-proxy-key`. Each of the three
+iframes loads this once at startup via `shared/backendConfig.ts`'s
+`loadBackendConfig()`, which reads `getBackendConfig()` — backed by this
+**browser's `localStorage`** (key `fal:backendConfig`), not board appData.
+That's deliberate: this is a per-person setting, not per-board or per-team —
+different people collaborating on the very same board may each be running
+their own self-hosted backend with their own `FAL_KEY`, and a board-level
+setting would wrongly force them to share one. (`shared/storage.ts`, which
+everything board-level like `fal:assetNaming`/`fal:catalogFilter` goes
+through, deliberately has no involvement here.) The panel (`panel/App.tsx`)
+forces the user into `SettingsScreen` (`forceBackendSetup`) until it's
+configured; there's deliberately no public default, so an
+installed-but-unconfigured browser fails closed instead of silently spending
+whoever's Fal credits happened to be baked into a shared build.
+`VITE_API_BASE_URL` / `VITE_BACKEND_KEY` remain as a local-dev-only fallback.
+
+Because reading `localStorage` is synchronous, `loadBackendConfig()` is too —
+there's no async gap where the panel doesn't yet know whether a backend is
+configured, unlike a board-appData read.
+
+`proxyUrl()` (used by the modal's capture-to-image tools) only uses `url`,
+never `key` — it ends up in an `<img>`/`<video>` `src` attribute, which can't
+carry a custom header (see the backend's auth section above). The embed URL
+builders (`videoEmbedUrl`, …) don't call the backend at all — see "Embed
+pages" above — so `backendUrl()`/`backendKey()` don't come into it for them.
 
 ## Option A — schema-driven form (the chosen approach)
 

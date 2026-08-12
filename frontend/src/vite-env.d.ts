@@ -1,7 +1,11 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
+  // Local-dev convenience only — never a default for the public build. Each
+  // installed board configures its own backend URL + key via the Settings
+  // screen (persisted in board appData); see src/lib/api.ts.
   readonly VITE_API_BASE_URL?: string;
+  readonly VITE_BACKEND_KEY?: string;
 }
 
 interface ImportMeta {
