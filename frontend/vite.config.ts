@@ -13,7 +13,12 @@ const htmlEntries = fs
     return acc;
   }, {});
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  // GitHub Pages serves this as a project site at /fal-miro/, not the domain
+  // root — every asset/embed URL in the app already goes through Vite's
+  // import.meta.env.BASE_URL (see frontendPageUrl in lib/api.ts), so this one
+  // line is enough. Dev server stays at '/' so `npm run dev` is unaffected.
+  base: command === 'build' ? '/fal-miro/' : '/',
   build: {
     rollupOptions: {
       input: htmlEntries,
@@ -24,4 +29,4 @@ export default defineConfig({
     // Runway uses 5173, ElevenLabs 5174 — keep this app on its own port.
     port: 5175,
   },
-});
+}));
