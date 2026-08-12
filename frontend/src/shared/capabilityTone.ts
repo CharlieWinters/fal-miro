@@ -5,6 +5,8 @@
 
 import type { Capability } from './falCatalog';
 
+const DEFAULT_TONE = '#8a8a92';
+
 export const CAPABILITY_TONE: Record<Capability, string> = {
   image: '#4BD1F6',
   video: '#CE70FC',
@@ -16,9 +18,13 @@ export const CAPABILITY_TONE: Record<Capability, string> = {
   rig: '#F25A6E',
   merge: '#FFDD33',
   sound: '#FFB454',
+  llm: '#7C9CFF',
+  vision: '#FF8FE3',
+  data: '#B8E986',
+  training: '#FF7A45',
+  workflow: '#A78BFA',
+  other: DEFAULT_TONE,
 };
-
-const DEFAULT_TONE = '#8a8a92';
 
 export function toneOf(capability: Capability | undefined): string {
   return (capability && CAPABILITY_TONE[capability]) || DEFAULT_TONE;

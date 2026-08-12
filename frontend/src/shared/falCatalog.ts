@@ -23,7 +23,16 @@ export type Capability =
   | 'panorama'
   | 'rig'
   | 'sound'
-  | 'merge';
+  | 'merge'
+  // Long-tail synced categories (LLM, vision, training data, workflows…) that
+  // used to have no icon/tone of their own and silently fell back to
+  // 'image' — see capabilityForCategory and FAL_CATEGORY_MAP.
+  | 'llm'
+  | 'vision'
+  | 'data'
+  | 'training'
+  | 'workflow'
+  | 'other';
 
 export type FalModel = {
   /** Fal endpoint id, e.g. "fal-ai/nano-banana/edit". */
@@ -160,8 +169,40 @@ export const DEFAULT_CATALOG_FILTER: CatalogFilter = { providers: null, categori
 let activeFilter: CatalogFilter = DEFAULT_CATALOG_FILTER;
 const catalogListeners = new Set<() => void>();
 
-// The live model set. Defaults to the hand list; replaced by the merged
-// (hand + fal-synced) list once the sync completes. Browse helpers read this.
+// Cache of the last successful catalog sync (see mergeSyncedCatalog below) —
+// read synchronously at module init so a *returning* user sees the full
+// catalog immediately instead of just the ~40-entry hand list while
+// api.getModels() re-fetches in the background (App.tsx). Only the first-ever
+// load per browser (no cache yet) falls back to the hand list. No staleness
+// check: even a week-old cache is a fine instant placeholder, since the
+// background refresh always overwrites it within seconds anyway.
+const CATALOG_CACHE_KEY = 'fal:catalogCache';
+
+function readCachedSyncedModels(): SyncedMeta[] | null {
+  try {
+    const raw = localStorage.getItem(CATALOG_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed?.models) ? (parsed.models as SyncedMeta[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist a fresh catalog sync for next load — see readCachedSyncedModels. */
+export function cacheSyncedModels(models: SyncedMeta[]): void {
+  try {
+    localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify({ at: Date.now(), models }));
+  } catch (e) {
+    console.warn('[falCatalog] cacheSyncedModels failed:', e);
+  }
+}
+
+// The live model set. Defaults to the hand list; a cached sync from a
+// previous session (if any) is merged in further down this file, once
+// mergeSyncedCatalog and what it depends on are actually defined — calling
+// it up here, before those `const`s below have run, would throw (temporal
+// dead zone). Replaced again once a fresh sync completes. Browse helpers
+// read this.
 let activeModels: FalModel[] = FAL_MODELS;
 export function setActiveModels(models: FalModel[]): void {
   activeModels = models;
@@ -358,8 +399,13 @@ export function capabilityForCategory(category: string): Capability {
     case 'Image to Image':
       return 'image';
     case 'Image to Video':
+    case 'Text to Video':
+    case 'Video to Video':
+    case 'Audio to Video':
       return 'video';
     case 'Image to 3D':
+    case 'Text to 3D':
+    case '3d To 3d':
       return 'model3d';
     case 'Image to Panorama':
       return 'panorama';
@@ -370,11 +416,31 @@ export function capabilityForCategory(category: string): Capability {
     case 'Text to Audio':
       return 'music';
     case 'Text to Speech':
+    case 'Speech to Text':
+    case 'Audio To Text': // titleCaseKebab capitalizes every word ("To"), unlike
+    case 'Audio to Audio': //  the hand-written labels above — see FAL_CATEGORY_MAP.
+    case 'Speech To Speech':
       return 'audio';
     case 'Video editing':
       return 'merge';
+    case 'LLM':
+      return 'llm';
+    case 'Vision':
+    case 'Image To Text':
+    case 'Video To Text':
+      return 'vision';
+    case 'Image To Json':
+    case 'Text To Json':
+    case 'Json':
+      return 'data';
+    case 'Training':
+      return 'training';
+    case 'Workflow':
+      return 'workflow';
+    case 'Unknown':
+      return 'other';
     default:
-      return 'image';
+      return 'other';
   }
 }
 
@@ -494,9 +560,9 @@ const FAL_CATEGORY_MAP: Record<string, CategoryMapping> = {
   'text-to-speech': { label: 'Text to Speech', capability: 'audio', generate: true, screen: 'generic' },
   'audio-to-audio': { label: 'Audio to Audio', capability: 'audio', screen: 'generic' },
   'speech-to-text': { label: 'Speech to Text', capability: 'audio', screen: 'generic' },
-  vision: { label: 'Vision', capability: 'image', screen: 'generic' },
-  llm: { label: 'LLM', capability: 'image', screen: 'generic' },
-  training: { label: 'Training', capability: 'image', screen: 'generic' },
+  vision: { label: 'Vision', capability: 'vision', screen: 'generic' },
+  llm: { label: 'LLM', capability: 'llm', screen: 'generic' },
+  training: { label: 'Training', capability: 'training', screen: 'generic' },
 };
 
 function titleCaseKebab(s: string): string {
@@ -545,6 +611,16 @@ export function mergeSyncedCatalog(meta: SyncedMeta[]): FalModel[] {
   return out;
 }
 
+// Apply a cached sync from a previous session now that mergeSyncedCatalog
+// (and FAL_CATEGORY_MAP/mapFalCategory, which it depends on) are actually
+// defined — see the `activeModels` comment near the top of this file for why
+// this can't happen any earlier. No-op (stays on the hand list) on the
+// first-ever load, when there's nothing cached yet.
+{
+  const cachedSyncedModels = readCachedSyncedModels();
+  if (cachedSyncedModels) setActiveModels(mergeSyncedCatalog(cachedSyncedModels));
+}
+
 // Short labels used for capability chips/icons (also the task fallback).
 const CAPABILITY_LABEL: Record<Capability, string> = {
   image: 'Image',
@@ -557,6 +633,12 @@ const CAPABILITY_LABEL: Record<Capability, string> = {
   rig: 'Rig',
   sound: 'Sound',
   merge: 'Merge',
+  llm: 'LLM',
+  vision: 'Vision',
+  data: 'Data',
+  training: 'Training',
+  workflow: 'Workflow',
+  other: 'Other',
 };
 
 // ---------------------------------------------------------------------------
@@ -589,4 +671,13 @@ export const COMMON_ARGS: Record<Capability, string[]> = {
   rig: [],
   sound: ['prompt'],
   merge: [],
+  // Long-tail (all screen: 'generic') — names absent from a given model's
+  // schema are simply skipped, so these are best-effort guesses at the
+  // typical primary field, not a hard requirement.
+  llm: ['prompt', 'system_prompt'],
+  vision: ['prompt', 'image_url'],
+  data: ['prompt', 'image_url'],
+  training: ['images_data_url'],
+  workflow: ['prompt'],
+  other: ['prompt'],
 };

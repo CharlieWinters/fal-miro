@@ -59,6 +59,41 @@ const ICONS: Partial<Record<Capability, El[]>> = {
     ['path', { d: 'M12 17v4' }],
     ['path', { d: 'M8 21h8' }],
   ],
+  // Chat bubble + text lines — LLM/text-reasoning models.
+  llm: [
+    ['path', { d: 'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-4 4v-4H6a2 2 0 0 1-2-2z' }],
+    ['path', { d: 'M8 8h8' }],
+    ['path', { d: 'M8 11.5h5' }],
+  ],
+  // Eye — vision/captioning models (image-to-text, video-to-text, etc.).
+  vision: [
+    ['path', { d: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z' }],
+    ['circle', { cx: 12, cy: 12, r: 3 }],
+  ],
+  // Braces — structured-data in/out (JSON) models.
+  data: [
+    ['path', { d: 'M8 3C6 3 5 4 5 6v2c0 1.5-1 2-2 2 1 0 2 .5 2 2v2c0 2 1 3 3 3' }],
+    ['path', { d: 'M16 3c2 0 3 1 3 3v2c0 1.5 1 2 2 2-1 0-2 .5-2 2v2c0 2-1 3-3 3' }],
+  ],
+  // Rising line chart — training/fine-tuning jobs.
+  training: [
+    ['path', { d: 'M3 3v18h18' }],
+    ['path', { d: 'M7 15l4-4 3 3 6-7' }],
+  ],
+  // Connected nodes — multi-step workflows/pipelines.
+  workflow: [
+    ['rect', { x: 3, y: 3, width: 6, height: 6, rx: 1.5 }],
+    ['rect', { x: 15, y: 3, width: 6, height: 6, rx: 1.5 }],
+    ['rect', { x: 9, y: 15, width: 6, height: 6, rx: 1.5 }],
+    ['path', { d: 'M6 9v2a3 3 0 0 0 3 3' }],
+    ['path', { d: 'M18 9v2a3 3 0 0 1-3 3' }],
+  ],
+  // Question mark — uncategorized/unknown.
+  other: [
+    ['circle', { cx: 12, cy: 12, r: 9 }],
+    ['path', { d: 'M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7v.3' }],
+    ['path', { d: 'M12 17h.01' }],
+  ],
 };
 
 /** The capability icon in a tone-tinted rounded chip (modal headers, cards). */

@@ -14,6 +14,7 @@ import { ActiveJobsTray } from './ActiveJobsTray';
 import { CreditsBadge } from './CreditsBadge';
 import {
   applyFavourites,
+  cacheSyncedModels,
   familyByKey,
   findModel,
   isReferenceToVideo,
@@ -137,7 +138,11 @@ function App() {
       .catch((e) => console.warn('[App] loading catalog filter failed', e));
     api
       .getModels()
-      .then((res) => setActiveModels(mergeSyncedCatalog(res.models)))
+      .then((res) => {
+        setActiveModels(mergeSyncedCatalog(res.models));
+        // Cache for next load — see falCatalog.ts's readCachedSyncedModels.
+        cacheSyncedModels(res.models);
+      })
       .catch((e) => console.warn('[App] catalog sync failed — using built-in list', e));
     getFavourites()
       .then(applyFavourites)
@@ -209,7 +214,7 @@ function App() {
         )}
         <span className="brand">fal</span>
         <span className="brand-sub">for Miro</span>
-        <CreditsBadge />
+        <CreditsBadge onOpenSettings={() => setShowSettings(true)} />
       </div>
 
       <div className="content">
