@@ -2,6 +2,16 @@
 # (gitignored) and fill in real values — never commit `.dev.vars` itself.
 #
 # In production these are set with `wrangler secret put FAL_KEY` /
-# `wrangler secret put ADMIN_KEY` instead of living in a file.
+# `wrangler secret put ADMIN_KEY` / `wrangler secret put BACKEND_KEY` instead
+# of living in a file.
 FAL_KEY=
 ADMIN_KEY=
+# Any random string — required. The frontend sends it back as the
+# x-fal-proxy-key header; without a match every /api/fal/* call is rejected.
+BACKEND_KEY=
+# Only needed for "Connect Miro account" (reading Doc-format item content).
+# From Miro's "Your apps" dashboard — register an OAuth redirect URI there
+# matching MIRO_REDIRECT_URI in wrangler.toml (or this same value for
+# `wrangler dev`, e.g. http://localhost:8787/oauth/callback).
+MIRO_CLIENT_ID=
+MIRO_CLIENT_SECRET=

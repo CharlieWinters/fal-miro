@@ -8,10 +8,31 @@ compatibility_date = "2026-08-01"
 ALLOWED_ORIGINS = "http://localhost:5175"
 FAL_PLATFORM_API_BASE = "https://api.fal.ai/v1"
 DEBUG = "1"
+# Must exactly match the OAuth redirect URI registered against this app in
+# Miro's "Your apps" dashboard (Profile settings → Your apps). Only needed if
+# you want the "Connect Miro account" / read-Doc-content feature — everything
+# else works without it.
+MIRO_REDIRECT_URI = "https://your-backend.example.com/oauth/callback"
 
-# FAL_KEY and ADMIN_KEY are secrets, not vars — they don't belong in this
-# file (it's committed to git). Set them with:
+# FAL_KEY, ADMIN_KEY, BACKEND_KEY, MIRO_CLIENT_ID, and MIRO_CLIENT_SECRET are
+# secrets, not vars — they don't belong in this file (it's committed to git).
+# Set them with:
 #   wrangler secret put FAL_KEY
 #   wrangler secret put ADMIN_KEY
+#   wrangler secret put BACKEND_KEY       # any random string; required — every
+#                                         # /api/fal/* (and /api/miro/*) request
+#                                         # is rejected without a matching
+#                                         # x-fal-proxy-key header
+#   wrangler secret put MIRO_CLIENT_ID     # from Miro's "Your apps" dashboard
+#   wrangler secret put MIRO_CLIENT_SECRET # only needed for "Connect Miro account"
 # For local `wrangler dev`, put them in a gitignored `.dev.vars` file instead
 # (copy `.dev.vars.example`).
+
+# Optional: a KV namespace for OAuth token storage, so connections survive a
+# restart/redeploy and aren't scoped to one isolate. Without this, tokens are
+# kept in memory only (fine for casual/local use). Create one with:
+#   wrangler kv namespace create MIRO_TOKENS
+# then uncomment below and fill in the id it prints.
+# [[kv_namespaces]]
+# binding = "MIRO_TOKENS"
+# id = "<paste the id from `wrangler kv namespace create` here>"

@@ -7,8 +7,8 @@ import { type AppEnv, resolveEnv } from './lib/env.js';
 import { logBox, summarizeInput } from './lib/logging.js';
 import { extractOutputUrls, normalizeStatus } from './lib/output.js';
 import { falError, messageOf } from './lib/errors.js';
-import { audioPlayerHtml, modelViewerHtml, panoramaHtml, videoPlayerHtml } from './lib/embeds.js';
 import { jsonResponse } from './lib/http.js';
+import { exchangeMiroCode, getValidMiroAccessToken, hasMiroToken, storeMiroToken } from './lib/miroOauth.js';
 
 // Runtime-agnostic Hono app — the same routes/logic run on Node
 // (src/node.ts) and Cloudflare Workers (src/worker.ts). The FAL_KEY lives
@@ -28,18 +28,50 @@ app.use(
       return allowedOrigins.includes(origin) ? origin : null;
     },
     allowMethods: ['GET', 'POST'],
+    allowHeaders: ['Content-Type', 'x-fal-proxy-key'],
   }),
 );
+
+// ---------------------------------------------------------------------------
+// Auth — every /api/fal/* call must send back the shared secret configured as
+// BACKEND_KEY. This is the actual access control: the CORS config above only
+// stops a *browser* from reading a disallowed origin's response — it does
+// nothing to stop a direct curl/script call from reaching these routes and
+// spending this deployment's FAL_KEY credits. Fails closed: an unconfigured
+// BACKEND_KEY blocks every request rather than silently allowing them.
+//
+// /embed/* and /proxy are deliberately exempt from this check — they're
+// loaded via <iframe>/<img>/<video> src, which can't attach a custom header.
+// /proxy is hardened separately below by restricting which hosts it'll fetch.
+// ---------------------------------------------------------------------------
+app.use('/api/fal/*', async (c, next) => {
+  const { backendKey } = resolveEnv(c);
+  if (!backendKey) {
+    return c.json({ error: 'This deployment has no BACKEND_KEY configured — set one before use.' }, 500);
+  }
+  if (c.req.header('x-fal-proxy-key') !== backendKey) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  return next();
+});
+
+// Same rule, same reasoning, for the Miro-documents API below.
+app.use('/api/miro/*', async (c, next) => {
+  const { backendKey } = resolveEnv(c);
+  if (!backendKey) {
+    return c.json({ error: 'This deployment has no BACKEND_KEY configured — set one before use.' }, 500);
+  }
+  if (c.req.header('x-fal-proxy-key') !== backendKey) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  return next();
+});
 
 /** The fal client keeps its credentials in module-level state; (re)configure
  * it at the top of every handler that calls it, since on Workers the key only
  * becomes available once a request arrives (there's no shared "boot" step). */
 function configureFal(falKey: string | undefined): void {
   if (falKey) fal.config({ credentials: falKey });
-}
-
-function requireUrlParam(url: string | undefined): url is string {
-  return Boolean(url && /^https?:\/\//.test(url));
 }
 
 // ---------------------------------------------------------------------------
@@ -50,61 +82,17 @@ app.get('/healthz', (c) => {
   return c.json({ ok: true, hasKey: Boolean(falKey), hasAdminKey: Boolean(adminKey) });
 });
 
-// ---------------------------------------------------------------------------
-// Video embed player
-//   GET /embed/video?url=<encoded fal video url>
-// ---------------------------------------------------------------------------
-app.get('/embed/video', (c) => {
-  const url = c.req.query('url');
-  if (!requireUrlParam(url)) return c.text('Missing or invalid url', 400);
-  return c.html(videoPlayerHtml(url));
-});
-
-// ---------------------------------------------------------------------------
-// Audio player
-//   GET /embed/audio?url=<encoded fal audio url>
-// ---------------------------------------------------------------------------
-app.get('/embed/audio', (c) => {
-  const url = c.req.query('url');
-  if (!requireUrlParam(url)) return c.text('Missing or invalid url', 400);
-  return c.html(audioPlayerHtml(url));
-});
-
-// ---------------------------------------------------------------------------
-// 3D model viewer
-//   GET /embed/3d?url=<encoded fal .glb url>
-// ---------------------------------------------------------------------------
-app.get('/embed/3d', (c) => {
-  const url = c.req.query('url');
-  if (!requireUrlParam(url)) return c.text('Missing or invalid url', 400);
-  return c.html(modelViewerHtml(url, { autoRotate: true, ar: true }));
-});
-
-// ---------------------------------------------------------------------------
-// Rigged-character viewer
-//   GET /embed/rig?url=<encoded animated .glb url>
-// ---------------------------------------------------------------------------
-app.get('/embed/rig', (c) => {
-  const url = c.req.query('url');
-  if (!requireUrlParam(url)) return c.text('Missing or invalid url', 400);
-  return c.html(modelViewerHtml(url, { autoplay: true }));
-});
-
-// ---------------------------------------------------------------------------
-// 360° panorama viewer
-//   GET /embed/panorama?url=<encoded equirectangular image url>
-// ---------------------------------------------------------------------------
-app.get('/embed/panorama', (c) => {
-  const url = c.req.query('url');
-  if (!requireUrlParam(url)) return c.text('Missing or invalid url', 400);
-  // Load the texture through our proxy (same origin as this page) → clean.
-  const texUrl = `/proxy?url=${encodeURIComponent(url)}`;
-  return c.html(panoramaHtml(texUrl));
-});
+// Note: /embed/video, /embed/audio, /embed/3d, /embed/rig, /embed/panorama
+// used to live here. They're now static pages shipped with the frontend
+// (embed-video.html etc.) — verified live that none of them actually need a
+// backend: video/audio/3d/rig play the Fal CDN URL directly, and even
+// panorama's WebGL sky texture loads cross-origin cleanly (Fal's CDN sends
+// Access-Control-Allow-Origin). See frontend/ARCHITECTURE.md.
 
 // ---------------------------------------------------------------------------
 // CORS proxy — streams a remote asset (a Fal .glb or .mp4) back with an
-// Access-Control-Allow-Origin header. Two callers rely on this:
+// Access-Control-Allow-Origin header. Used by the modal's capture-to-image
+// tools:
 //   • "3D Viewer → Image" loads a .glb into <model-viewer> and snapshots it;
 //   • "Video Player → Image" loads a .mp4 into a <video crossorigin> and draws
 //     the current frame to a canvas.
@@ -116,8 +104,19 @@ app.get('/embed/panorama', (c) => {
 // Built on fetch() + ReadableStream (not node:http/https) so it runs
 // unchanged on Node, Cloudflare Workers, or any other fetch-based runtime.
 //
+// Unauthenticated by design (see the /api/fal/* auth middleware above) — it's
+// only ever loaded via <img>/<video>/<iframe> src, none of which can attach
+// the shared-secret header. Instead, the target host is restricted to Fal's
+// own media CDN, so this can't be abused as a general-purpose open relay for
+// arbitrary URLs; every real caller in this codebase only ever proxies a URL
+// that a Fal generation just returned.
+//
 //   GET /proxy?url=<encoded url>
 // ---------------------------------------------------------------------------
+function isAllowedProxyHost(hostname: string): boolean {
+  return hostname === 'fal.media' || hostname.endsWith('.fal.media');
+}
+
 app.get('/proxy', async (c) => {
   const target = c.req.query('url') ?? '';
   let parsed: URL;
@@ -128,6 +127,9 @@ app.get('/proxy', async (c) => {
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return c.json({ error: 'Invalid scheme' }, 400);
+  }
+  if (!isAllowedProxyHost(parsed.hostname)) {
+    return c.json({ error: `Host "${parsed.hostname}" is not allowed — only Fal's media CDN can be proxied.` }, 400);
   }
 
   const range = c.req.header('range');
@@ -470,6 +472,145 @@ app.get('/api/fal/estimate', async (c) => {
     });
   } catch (err) {
     console.error('[estimate] error:', err);
+    return c.json({ error: messageOf(err) }, 502);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Miro OAuth — lets the backend call Miro's REST API as a specific person,
+// for the one thing the Web SDK can't do: read a Doc-format item's text
+// content (see boardHelpers.getDocumentText on the frontend). Authorization-
+// code flow (see lib/miroOauth.ts); tokens are keyed by Miro user id, not
+// board or team.
+//
+// `state` here is just the user id, not a signed/random nonce — this app has
+// no session/cookie concept at all (see the BACKEND_KEY model above), so a
+// stricter CSRF-safe nonce would need session storage this app doesn't have.
+// Acceptable for a self-hosted, single-tenant deployment; revisit if this
+// backend is ever exposed multi-tenant.
+//
+// Not behind the /api/miro/* BACKEND_KEY gate below — these are full-page
+// browser navigations (the redirect to Miro, and Miro's redirect back), not
+// fetch() calls that could attach a custom header.
+//
+//   GET /oauth/start?userId=<miro user id>
+//   GET /oauth/callback?code=...&state=<userId>
+// ---------------------------------------------------------------------------
+app.get('/oauth/start', (c) => {
+  const { miroClientId, miroRedirectUri } = resolveEnv(c);
+  const userId = c.req.query('userId');
+  if (!miroClientId || !miroRedirectUri) {
+    return c.json({ error: 'MIRO_CLIENT_ID / MIRO_REDIRECT_URI not configured on this backend.' }, 500);
+  }
+  if (!userId) return c.json({ error: 'userId query param is required' }, 400);
+
+  const url = new URL('https://miro.com/oauth/authorize');
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('client_id', miroClientId);
+  url.searchParams.set('redirect_uri', miroRedirectUri);
+  url.searchParams.set('state', userId);
+  return c.redirect(url.toString());
+});
+
+app.get('/oauth/callback', async (c) => {
+  const { miroClientId, miroClientSecret, miroRedirectUri } = resolveEnv(c);
+  const code = c.req.query('code');
+  const userId = c.req.query('state');
+  if (!miroClientId || !miroClientSecret || !miroRedirectUri) {
+    return c.json(
+      { error: 'MIRO_CLIENT_ID / MIRO_CLIENT_SECRET / MIRO_REDIRECT_URI not configured on this backend.' },
+      500,
+    );
+  }
+  if (!code || !userId) {
+    return c.json({ error: 'Missing code or state from Miro' }, 400);
+  }
+  try {
+    const token = await exchangeMiroCode({
+      clientId: miroClientId,
+      clientSecret: miroClientSecret,
+      code,
+      redirectUri: miroRedirectUri,
+    });
+    await storeMiroToken(c, userId, token);
+    console.log(`[oauth/callback] stored a token for userId=${userId}`);
+    return c.html('<p>Connected to Miro — you can close this tab and go back to the board.</p>');
+  } catch (err) {
+    console.error('[oauth/callback] error:', messageOf(err));
+    return c.html(`<p>Failed to connect: ${messageOf(err)}</p>`, 502);
+  }
+});
+
+// Status check — is this Miro account currently connected? Doesn't refresh
+// or validate the token, just reports presence, for a Settings-screen
+// indicator (and to tell a lost-in-memory-store restart apart from a failed
+// exchange without guessing).
+//   GET /api/miro/status?userId=...  → { connected: boolean }
+app.get('/api/miro/status', async (c) => {
+  const userId = c.req.query('userId');
+  if (!userId) return c.json({ error: 'userId query param is required' }, 400);
+  return c.json({ connected: await hasMiroToken(c, userId) });
+});
+
+// ---------------------------------------------------------------------------
+// Read a Doc-format item's content — the one thing the Web SDK can't do.
+//
+//   GET /api/miro/documents/:itemId?boardId=...&userId=...
+//   → { content: string, contentVersion: number | null }
+//
+// Uses the generic "Get item" endpoint (GET /v2/boards/{id}/items/{itemId})
+// rather than a type-specific `doc_formats` path — confirmed live that the
+// latter isn't a real route (Miro's API rejected it with a validation error
+// naming a completely different type enum). The generic item endpoint needs
+// no type-specific path at all, and its response already carries
+// `data.content`/`data.contentVersion` for a Doc-format item, same as
+// confirmed via board_list_items during development.
+// ---------------------------------------------------------------------------
+function boardItemUrl(boardId: string, itemId: string): string {
+  return `https://api.miro.com/v2/boards/${encodeURIComponent(boardId)}/items/${encodeURIComponent(itemId)}`;
+}
+
+app.get('/api/miro/documents/:itemId', async (c) => {
+  const { miroClientId, miroClientSecret } = resolveEnv(c);
+  try {
+    const itemId = c.req.param('itemId');
+    const boardId = c.req.query('boardId');
+    const userId = c.req.query('userId');
+    if (!boardId || !userId) {
+      return c.json({ error: 'boardId and userId query params are required' }, 400);
+    }
+    if (!miroClientId || !miroClientSecret) {
+      return c.json({ error: 'MIRO_CLIENT_ID / MIRO_CLIENT_SECRET not configured on this backend.' }, 500);
+    }
+
+    const accessToken = await getValidMiroAccessToken(c, userId, {
+      clientId: miroClientId,
+      clientSecret: miroClientSecret,
+    });
+    if (!accessToken) {
+      return c.json(
+        { error: 'This Miro account isn’t connected yet — use "Connect Miro account" in Settings.' },
+        401,
+      );
+    }
+
+    const upstream = await fetch(boardItemUrl(boardId, itemId), {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const payload: any = await upstream.json().catch(() => null);
+    if (!upstream.ok) {
+      return jsonResponse({ error: payload?.message ?? `Miro documents API ${upstream.status}` }, upstream.status);
+    }
+
+    const content = payload?.data?.content ?? payload?.content ?? null;
+    const contentVersion = payload?.data?.contentVersion ?? payload?.content_version ?? null;
+    if (typeof content !== 'string') {
+      return c.json({ error: 'Unexpected response shape from Miro documents API' }, 502);
+    }
+    return c.json({ content, contentVersion });
+  } catch (err) {
+    console.error('[documents] error:', messageOf(err));
     return c.json({ error: messageOf(err) }, 502);
   }
 });
