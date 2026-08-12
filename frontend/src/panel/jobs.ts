@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { AGENT_UPDATE, type AgentUpdateMessage } from '../shared/messageTypes';
-import { getActiveJobs, type ActiveJob } from '../shared/storage';
+import { getActiveJobs, removeActiveJob, type ActiveJob } from '../shared/storage';
+import { api } from '../lib/api';
+import { makePlaceholderDataUrl, replaceImageContent } from '../shared/boardHelpers';
 
 /**
  * Panel-side, in-memory job ledger. Tracks every `startAgentJob` call, listens
@@ -84,6 +86,49 @@ export function useActiveJobs(): LocalJob[] {
   const [jobs, setJobs] = useState<LocalJob[]>([]);
   useEffect(() => jobLedger.subscribe(setJobs), []);
   return jobs;
+}
+
+/**
+ * Dismiss a job the user no longer wants to see — whether it's genuinely stuck
+ * (a resumed poll that keeps timing out) or just one they'd rather stop. Best
+ * effort, in three steps that each degrade gracefully:
+ *  1. Ask Fal to cancel the request (harmless no-op if it's already too far
+ *     along — Fal's own queue.cancel can throw for that; we swallow it).
+ *  2. Swap its board placeholder to a "Cancelled" state, if we can still find
+ *     one tracked in the persisted ledger (gives the stuck "Generating…" card
+ *     a resolution instead of leaving it frozen).
+ *  3. Remove it from both the live (in-panel) and persisted (board appData)
+ *     ledgers so it stops showing up in the tray — on this reload and future
+ *     ones.
+ * `falRequestId` may be unknown yet (job dismissed before Fal returned a
+ * queue id) — in that case there's nothing remote to cancel or clean up, so
+ * only the local ledger entry is removed.
+ */
+export async function dismissJob(opts: { localRequestId?: string; falRequestId?: string }): Promise<void> {
+  const { localRequestId, falRequestId } = opts;
+  if (localRequestId) jobLedger.remove(localRequestId);
+  if (!falRequestId) return;
+
+  const jobs = await getActiveJobs();
+  const entry = jobs.find((j) => j.requestId === falRequestId);
+  if (entry) {
+    try {
+      await api.cancel(entry.endpointId, entry.requestId);
+    } catch (e) {
+      console.warn('[jobs] remote cancel failed (best-effort, may already be running):', e);
+    }
+    try {
+      await replaceImageContent(
+        entry.placeholderId,
+        makePlaceholderDataUrl(entry.settings.ratio, 'Cancelled'),
+        'Fal · Cancelled',
+        entry.targetPosition,
+      );
+    } catch (e) {
+      console.warn('[jobs] clearing placeholder failed:', e);
+    }
+  }
+  await removeActiveJob(falRequestId);
 }
 
 /**
