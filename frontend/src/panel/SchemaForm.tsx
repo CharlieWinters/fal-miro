@@ -96,6 +96,20 @@ function FieldControl({
         </label>
       );
 
+    case 'video':
+      return (
+        <label className="field">
+          {label}
+          <input
+            type="text"
+            value={asString(value)}
+            placeholder="Video URL (or connect a Fal video on the board)"
+            onChange={(e) => onChange(field.name, e.target.value)}
+          />
+          {hint}
+        </label>
+      );
+
     case 'boolean':
       return (
         <label className="field-row">

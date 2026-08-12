@@ -48,6 +48,17 @@ const ICONS: Partial<Record<Capability, El[]>> = {
     ['path', { d: 'M16 8.5a5 5 0 0 1 0 7' }],
     ['path', { d: 'M18.5 6a9 9 0 0 1 0 12' }],
   ],
+  music: [
+    ['path', { d: 'M9 18V5l10-2v13' }],
+    ['circle', { cx: 6, cy: 18, r: 3 }],
+    ['circle', { cx: 16, cy: 16, r: 3 }],
+  ],
+  audio: [
+    ['rect', { x: 9, y: 2, width: 6, height: 11, rx: 3 }],
+    ['path', { d: 'M5 10a7 7 0 0 0 14 0' }],
+    ['path', { d: 'M12 17v4' }],
+    ['path', { d: 'M8 21h8' }],
+  ],
 };
 
 /** The capability icon in a tone-tinted rounded chip (modal headers, cards). */
