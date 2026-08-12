@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
  * (e.g. 'sticky_note'). Re-emits whenever the selection changes.
  */
 export function useFirstSelected<T = unknown>(
-  type: 'sticky_note' | 'image' | 'embed',
+  type: 'sticky_note' | 'image' | 'embed' | 'card',
 ): T | null {
   const [item, setItem] = useState<T | null>(null);
 
@@ -45,7 +45,7 @@ export function useFirstSelected<T = unknown>(
 
 /** Like useFirstSelected, but returns ALL selected items of the given type. */
 export function useSelectedItems<T = unknown>(
-  type: 'sticky_note' | 'image' | 'embed',
+  type: 'sticky_note' | 'image' | 'embed' | 'card',
 ): T[] {
   const [items, setItems] = useState<T[]>([]);
 

@@ -5,6 +5,7 @@ import {
   enabledModels,
   familiesByCategory,
   familiesByProvider,
+  findModel,
   providerOf,
   providersPresent,
   type Capability,
@@ -27,6 +28,7 @@ import {
 import { setSceneInputs } from '../../shared/storage';
 import { toneOf, toneFill, toneOutline } from '../../shared/capabilityTone';
 import { CapabilityIcon } from '../CapabilityIcon';
+import { parseRecipeCard, type RecipeCard } from '../../shared/recipeCard';
 
 /** "→ Image" capture utilities that open in the modal for a large view. */
 export type CaptureTool =
@@ -191,12 +193,14 @@ export function HomeScreen({
   onOpenTool,
   onOpenScene,
   onOpenSettings,
+  onOpenRecipe,
 }: {
   onSelectFamily: (familyKey: string) => void;
   onSelectModel: (m: FalModel) => void;
   onOpenTool: (tool: CaptureTool, itemId: string) => void;
   onOpenScene: () => void;
   onOpenSettings: () => void;
+  onOpenRecipe: (recipe: RecipeCard, cardId: string) => void;
 }) {
   useCatalogVersion(); // re-render Browse when the curation filter changes
   const [query, setQuery] = useState('');
@@ -209,6 +213,14 @@ export function HomeScreen({
   const hasVideoSelected = Boolean(selectedEmbed?.url && unwrapVideoEmbedUrl(selectedEmbed.url));
   const hasPanoramaSelected = Boolean(selectedEmbed?.url && unwrapPanoramaEmbedUrl(selectedEmbed.url));
   const hasRigSelected = Boolean(selectedEmbed?.url && unwrapRigEmbedUrl(selectedEmbed.url));
+
+  // Selection-aware settings-card reopen — a Card whose description parses as
+  // a recipe (see recipeCard.ts) offers to jump back into its model screen.
+  const selectedCard = useFirstSelected<{ id: string; description?: string }>('card');
+  const selectedRecipe = useMemo(() => parseRecipeCard(selectedCard?.description), [selectedCard]);
+  const recipeModelLabel = selectedRecipe
+    ? findModel(selectedRecipe.endpointId)?.label ?? selectedRecipe.endpointId.replace(/^fal-ai\//, '')
+    : '';
 
   const selectedEmbeds = useSelectedItems<{ id: string; url?: string; title?: string }>('embed');
   const sceneAssets = selectedEmbeds
@@ -261,8 +273,9 @@ export function HomeScreen({
   const drillCount = drill?.type === 'usecase' ? drilledTargets.length : drilledFamilies.length;
 
   const hasSelectionZone =
-    Boolean(selectedEmbed) &&
-    (has3dViewerSelected || hasVideoSelected || hasPanoramaSelected || hasRigSelected || sceneAssets.length >= 1);
+    Boolean(selectedRecipe) ||
+    (Boolean(selectedEmbed) &&
+      (has3dViewerSelected || hasVideoSelected || hasPanoramaSelected || hasRigSelected || sceneAssets.length >= 1));
 
   return (
     <div className="screen">
@@ -273,10 +286,18 @@ export function HomeScreen({
         onChange={(e) => setQuery(e.target.value)}
       />
 
-      {hasSelectionZone && selectedEmbed && (
+      {hasSelectionZone && (
         <div className="sel-zone">
           <span className="eyebrow">For your selection</span>
-          {has3dViewerSelected && (
+          {selectedRecipe && selectedCard && (
+            <ToolCard
+              capability={selectedRecipe.capability}
+              title={`Reopen · ${recipeModelLabel}`}
+              sub="Load this settings card back into its model screen"
+              onOpen={() => onOpenRecipe(selectedRecipe, selectedCard.id)}
+            />
+          )}
+          {selectedEmbed && has3dViewerSelected && (
             <ToolCard
               capability="model3d"
               title="3D Viewer → Image"
@@ -284,7 +305,7 @@ export function HomeScreen({
               onOpen={() => onOpenTool('viewer3d-to-image', selectedEmbed.id)}
             />
           )}
-          {hasVideoSelected && (
+          {selectedEmbed && hasVideoSelected && (
             <ToolCard
               capability="video"
               title="Video Player → Image"
@@ -292,7 +313,7 @@ export function HomeScreen({
               onOpen={() => onOpenTool('video-to-image', selectedEmbed.id)}
             />
           )}
-          {hasPanoramaSelected && (
+          {selectedEmbed && hasPanoramaSelected && (
             <ToolCard
               capability="panorama"
               title="Panorama Viewer → Image"
@@ -300,7 +321,7 @@ export function HomeScreen({
               onOpen={() => onOpenTool('panorama-to-image', selectedEmbed.id)}
             />
           )}
-          {hasRigSelected && (
+          {selectedEmbed && hasRigSelected && (
             <ToolCard
               capability="rig"
               title="Rig Viewer → Image (animate)"
@@ -308,7 +329,7 @@ export function HomeScreen({
               onOpen={() => onOpenTool('rig-to-image', selectedEmbed.id)}
             />
           )}
-          {hasRigSelected && (
+          {selectedEmbed && hasRigSelected && (
             <ToolCard
               capability="rig"
               title="Pose Character (manual)"

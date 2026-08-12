@@ -219,7 +219,9 @@ export function modelsByCapability(capability: Capability): FalModel[] {
 }
 
 export function findModel(endpointId: string): FalModel | undefined {
-  return FAL_MODELS.find((m) => m.endpointId === endpointId);
+  // Search the live (hand + synced) catalog, not just the hand list — a
+  // settings card can reference a long-tail synced model.
+  return activeModels.find((m) => m.endpointId === endpointId);
 }
 
 /** Reference-to-video: driven by the multi-reference picker (Seedance / Veo). */
@@ -485,6 +487,7 @@ const FAL_CATEGORY_MAP: Record<string, CategoryMapping> = {
   'image-to-video': { label: 'Image to Video', capability: 'video' },
   'video-to-video': { label: 'Video to Video', capability: 'video' },
   'audio-to-video': { label: 'Audio to Video', capability: 'video' },
+  'video-to-audio': { label: 'Video to Audio', capability: 'sound' },
   'image-to-3d': { label: 'Image to 3D', capability: 'model3d' },
   'text-to-3d': { label: 'Text to 3D', capability: 'model3d', generate: true, screen: 'generic' },
   'text-to-audio': { label: 'Text to Audio', capability: 'music', generate: true, screen: 'generic' },

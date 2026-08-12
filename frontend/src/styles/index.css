@@ -249,6 +249,34 @@ select:focus {
   cursor: default;
 }
 
+/* Secondary action — outlined pill, sits alongside .primary (e.g. Save as
+   settings card next to Generate). */
+.secondary {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  padding: 12px 20px;
+  font: 600 14px 'Roobert PRO', system-ui, sans-serif;
+  cursor: pointer;
+  transition: background 140ms var(--ease);
+}
+.secondary:hover {
+  background: var(--card-2);
+}
+.secondary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.button-row {
+  display: flex;
+  gap: 10px;
+}
+.button-row .primary,
+.button-row .secondary {
+  flex: 1;
+}
+
 .notice {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -701,6 +729,26 @@ select:focus {
 }
 .tray-job.failed .tray-status {
   color: #ffb2b2;
+}
+.tray-dismiss {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.tray-dismiss:hover {
+  background: var(--border);
+  color: var(--fg);
 }
 
 /* ---- Fullscreen capture / builder modals ---- */
