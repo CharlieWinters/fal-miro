@@ -245,21 +245,27 @@ export async function setAssetNamingConfig(cfg: AssetNamingConfig): Promise<void
   );
 }
 
-// Backend connection (URL + shared secret) deliberately does NOT live here —
-// see shared/backendConfig.ts. It's per-person (localStorage), not per-board:
-// different people collaborating on the very same board may each be running
-// their own self-hosted backend with their own FAL_KEY.
+// Backend connection (URL + shared secret / Fal key) deliberately does NOT
+// live here — see shared/backendConfig.ts. Same reasoning as the two below:
+// per-person (localStorage), not per-board.
 
 // ---------------------------------------------------------------------------
-// Catalog curation filter — which providers/categories the board shows. See
-// falCatalog CatalogFilter (null = all). Small payload; lives in appData.
+// Catalog curation filter — which providers/categories Browse shows — and
+// favourited model families. Both are personal browsing preferences, not
+// board content: forcing one collaborator's filter/favourites onto everyone
+// else viewing the same board was the wrong scope, so these live in this
+// browser's localStorage (per-person), not board appData. Kept async (though
+// localStorage access is synchronous) so every existing call site —
+// `.then()`/`await` in App.tsx, SettingsScreen.tsx, favourites.ts — keeps
+// working unchanged.
 // ---------------------------------------------------------------------------
 const CATALOG_FILTER_KEY = 'fal:catalogFilter';
+const FAVOURITES_KEY = 'fal:favourites';
 
 export async function getCatalogFilter(): Promise<CatalogFilter> {
   try {
-    const all = await readAppData();
-    const v = all?.[CATALOG_FILTER_KEY];
+    const raw = localStorage.getItem(CATALOG_FILTER_KEY);
+    const v = raw ? JSON.parse(raw) : null;
     if (v && typeof v === 'object') return { ...DEFAULT_CATALOG_FILTER, ...(v as Partial<CatalogFilter>) };
   } catch (e) {
     console.warn('[storage] getCatalogFilter failed:', e);
@@ -268,21 +274,13 @@ export async function getCatalogFilter(): Promise<CatalogFilter> {
 }
 
 export async function setCatalogFilter(filter: CatalogFilter): Promise<void> {
-  await writeAppData(
-    CATALOG_FILTER_KEY,
-    stripUndefined(filter) as Parameters<typeof miro.board.setAppData>[1],
-  );
+  localStorage.setItem(CATALOG_FILTER_KEY, JSON.stringify(stripUndefined(filter)));
 }
-
-// ---------------------------------------------------------------------------
-// Favourites — a per-board list of favourited model-family keys.
-// ---------------------------------------------------------------------------
-const FAVOURITES_KEY = 'fal:favourites';
 
 export async function getFavourites(): Promise<string[]> {
   try {
-    const all = await readAppData();
-    const v = all?.[FAVOURITES_KEY];
+    const raw = localStorage.getItem(FAVOURITES_KEY);
+    const v = raw ? JSON.parse(raw) : null;
     return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
   } catch (e) {
     console.warn('[storage] getFavourites failed:', e);
@@ -291,7 +289,7 @@ export async function getFavourites(): Promise<string[]> {
 }
 
 export async function setFavourites(keys: string[]): Promise<void> {
-  await writeAppData(FAVOURITES_KEY, keys as Parameters<typeof miro.board.setAppData>[1]);
+  localStorage.setItem(FAVOURITES_KEY, JSON.stringify(keys));
 }
 
 export async function getItemGenerationSettings<T = unknown>(itemId: string): Promise<T | null> {
