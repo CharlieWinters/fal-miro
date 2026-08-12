@@ -10,6 +10,7 @@ import {
   parseRatio,
   replaceImageContent,
   resolveAbsolutePosition,
+  resolvePlaceholderAnchor,
 } from '../../../shared/boardHelpers';
 import {
   addActiveJob,
@@ -28,6 +29,9 @@ export type ImageToPanoramaPayload = {
   input: Record<string, unknown>;
   /** Which schema field the source image flows into (e.g. image_url). */
   referenceField?: { name: string; multiple: boolean; required: boolean };
+  /** The settings card this run was started from, if reopened from one — the
+   *  output places beside it instead of below the usual source anchor. */
+  cardAnchorId?: string;
 };
 
 export type ImageToPanoramaResult = {
@@ -46,6 +50,7 @@ export async function run(payload: unknown, requestId = ''): Promise<ImageToPano
     stickyId,
     input = {},
     referenceField,
+    cardAnchorId,
   } = (payload ?? {}) as ImageToPanoramaPayload;
 
   if (!endpointId) throw new Error('endpointId is required');
@@ -80,11 +85,13 @@ export async function run(payload: unknown, requestId = ''): Promise<ImageToPano
   const ratio = PANORAMA_RATIO;
 
   broadcastUpdate({ requestId, status: 'queued', message: 'Placing placeholder…' });
+  const { anchorId: placementAnchor, side } = await resolvePlaceholderAnchor(cardAnchorId, sourceImageId ?? stickyId);
   const { id: placeholderId, x: targetX, y: targetY } = await createImageBelow({
-    sourceItemId: sourceImageId ?? stickyId,
+    sourceItemId: placementAnchor,
     url: makePlaceholderDataUrl(ratio, 'Generating panorama…'),
     ratio,
     title: 'Fal · Generating panorama',
+    side,
   });
 
   broadcastUpdate({ requestId, status: 'running', message: 'Submitting to Fal…' });

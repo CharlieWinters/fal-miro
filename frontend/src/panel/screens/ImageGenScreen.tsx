@@ -1,17 +1,28 @@
 import { useEffect, useMemo, useState } from 'react';
 import { startAgentJob } from '../communication';
-import { useFirstSelected, useSelectedItems, orderedStickyText } from '../hooks/boardInputs';
+import { useBoardReferences, useBoardStickies, useFirstSelected, orderedStickyText } from '../hooks/boardInputs';
 import { SchemaForm } from '../SchemaForm';
-import { api } from '../../lib/api';
+import { api, unwrapVideoEmbedUrl } from '../../lib/api';
 import {
+  connectItemsToCard,
+  createCardBelow,
   getConnectedReferenceImages,
   getConnectedStickyNotes,
+  resolveBoardItems,
 } from '../../shared/boardHelpers';
+import {
+  RECIPE_CARD_VERSION,
+  resolveStickyFieldOverrides,
+  serializeRecipeCard,
+  type RecipeCard,
+  type RecipeSeed,
+} from '../../shared/recipeCard';
 import { COMMON_ARGS, type FalModel } from '../../shared/falCatalog';
 import {
   parseFalInputSchema,
   defaultsFor,
   pickReferenceField,
+  pickVideoReferenceField,
   pickViewImageFields,
   type Field,
 } from '../../shared/schema';
@@ -25,8 +36,8 @@ import {
 import { getAssetNamingConfig, setAssetNamingConfig } from '../../shared/storage';
 import { ModelMetaChips } from '../ModelMetaChips';
 
-type StickyItem = { id: string; content?: string; x?: number };
 type ImageItem = { id: string; title?: string };
+type EmbedItem = { id: string; url?: string; title?: string };
 
 type SchemaState =
   | { status: 'loading' }
@@ -44,10 +55,24 @@ const SIZE_TO_RATIO: Record<string, string> = {
   portrait_16_9: '9:16',
 };
 
-export function ImageGenScreen({ model }: { model: FalModel }) {
+export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: RecipeSeed | null }) {
   // Always call selection hooks (can't be conditional); pick what matters below.
-  const selectedStickies = useSelectedItems<StickyItem>('sticky_note');
+  // Frame-aware: a prompt sticky left inside a "prompt frame" is picked up
+  // the moment the frame is selected, not just when the sticky itself is.
+  const selectedStickies = useBoardStickies();
   const sourceImage = useFirstSelected<ImageItem>('image');
+  const rawSourceVideo = useFirstSelected<EmbedItem>('embed');
+  // Frame-aware: a selected frame's images/Fal-video embeds count as
+  // references too, same rule as ReferenceToVideoScreen/GenericModelScreen —
+  // unlike useSelectedItems, which only sees literally-selected items.
+  const boardRefs = useBoardReferences();
+
+  // A reopened settings card's connected images/videos — used as a fallback
+  // source until the user selects something directly on the board themselves.
+  const [seedRefs, setSeedRefs] = useState<{
+    images: Array<{ id: string; title?: string }>;
+    videos: Array<{ id: string; title?: string }>;
+  } | null>(null);
 
   const [schema, setSchema] = useState<SchemaState>({ status: 'loading' });
   const [meta, setMeta] = useState<Record<string, unknown> | null>(null);
@@ -92,9 +117,37 @@ export function ImageGenScreen({ model }: { model: FalModel }) {
     };
   }, [model.endpointId]);
 
+  // Stage a fresh seed's connected-resource ids (each reopen gets a unique
+  // token, so this reruns even when reopening the same model twice in a row).
+  useEffect(() => {
+    if (!seed) return;
+    setSeedRefs({ images: seed.images, videos: seed.videos });
+  }, [seed?.token]);
+
+  // Merge the seed's static input over the schema defaults once they're
+  // loaded, then apply any connected-sticky field overrides (e.g. a "Seed:
+  // 42" or "Prompt: …" sticky) — those win over the frozen input snapshot,
+  // since they reflect what's connected right now.
+  useEffect(() => {
+    if (!seed || schema.status === 'loading') return;
+    const overrides = resolveStickyFieldOverrides(seed.stickies, fields);
+    setValues((v) => ({ ...v, ...seed.input, ...overrides }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed?.token, schema.status]);
+
+  // Live selection takes over from the seed the instant the user picks
+  // something directly (the settings card itself is a 'card', not one of
+  // these types, so merely having it selected doesn't clear the seed).
+  useEffect(() => {
+    if (sourceImage || rawSourceVideo || selectedStickies.length || boardRefs.images.length || boardRefs.videos.length) {
+      setSeedRefs(null);
+    }
+  }, [sourceImage, rawSourceVideo, selectedStickies.length, boardRefs.images.length, boardRefs.videos.length]);
+
   const fields = schema.status === 'loading' ? [] : schema.fields;
   const hasPromptField = useMemo(() => fields.some((f) => f.name === 'prompt'), [fields]);
   const referenceField = useMemo(() => pickReferenceField(fields), [fields]);
+  const videoReferenceField = useMemo(() => pickVideoReferenceField(fields), [fields]);
   const isVideo = model.capability === 'video';
   const isSegment = model.capability === 'segment';
   const is3d = model.capability === 'model3d';
@@ -107,7 +160,9 @@ export function ImageGenScreen({ model }: { model: FalModel }) {
   // flow, which has its own two-frame screen.
   const viewFields = useMemo(() => (is3d ? pickViewImageFields(fields) : []), [fields, is3d]);
   const multiView = viewFields.length >= 2;
-  const selectedImages = useSelectedItems<ImageItem>('image');
+  // Frame-aware, unlike a plain multi-select — a "References" frame full of
+  // images works the same as shift-clicking each one.
+  const selectedImages = boardRefs.images;
   // Image-primary: the model *requires* an image, so the image is the subject
   // (Runway-style — select one on the board), not an optional URL field.
   // `generate` models force text-primary even if the schema marks an image required.
@@ -120,6 +175,36 @@ export function ImageGenScreen({ model }: { model: FalModel }) {
   const takesSingle = Boolean(referenceField) && !referenceField?.multiple && !multiView;
   // Image is mandatory (block generate until one's chosen) only when required.
   const imageRequired = imagePrimary;
+
+  // Same pattern as images, for video-to-video / video-edit models whose
+  // primary input is a `video_url`-shaped field (e.g. Google Omni Video Edit)
+  // rather than an image. A selected board item only counts as a candidate
+  // when it's a Fal-generated video embed (unwrapVideoEmbedUrl succeeds).
+  const sourceVideo = useMemo(
+    () => (rawSourceVideo?.url && unwrapVideoEmbedUrl(rawSourceVideo.url) ? rawSourceVideo : null),
+    [rawSourceVideo],
+  );
+  // Already filtered to Fal-video embeds by collectBoardReferences, and
+  // frame-aware for the same reason as selectedImages above.
+  const selectedVideos = boardRefs.videos;
+  const videoPrimary = !model.generate && Boolean(videoReferenceField?.required) && !multiView;
+  const takesMultiVideo = Boolean(videoReferenceField?.multiple) && !multiView;
+  const takesSingleVideo = Boolean(videoReferenceField) && !videoReferenceField?.multiple && !multiView;
+  const videoRequired = videoPrimary;
+
+  // Effective sources: live board selection, falling back to a reopened
+  // recipe's connected images/videos (titles included) until the user
+  // selects something themselves.
+  const effectiveSourceImage: ImageItem | null = sourceImage ?? seedRefs?.images[0] ?? null;
+  const effectiveSelectedImages: ImageItem[] = selectedImages.length ? selectedImages : seedRefs?.images ?? [];
+  const effectiveSourceVideo: EmbedItem | null = sourceVideo ?? seedRefs?.videos[0] ?? null;
+  const effectiveSelectedVideos: EmbedItem[] = selectedVideos.length ? selectedVideos : seedRefs?.videos ?? [];
+
+  // The frame the current references came from, if any — live selection
+  // wins, else falls back to the reopened card's own frame. Lets the output
+  // place below that frame, sized to match, instead of trailing one item.
+  const usingLiveRefs = Boolean(sourceImage || sourceVideo || selectedImages.length || selectedVideos.length);
+  const referenceFrameId = usingLiveRefs ? boardRefs.frameId : seed?.frameId ?? undefined;
 
   // Reset view-slot assignments when switching models.
   useEffect(() => {
@@ -135,7 +220,9 @@ export function ImageGenScreen({ model }: { model: FalModel }) {
   // Seed the prompt from board context (until the user edits it):
   //  - all selected sticky notes, joined left-to-right; otherwise
   //  - sticky notes connected to a selected image (works in any mode, so a
-  //    generator like Nano Banana picks them up when an image is selected).
+  //    generator like Nano Banana picks them up when an image is selected);
+  //  - sticky notes connected to a selected video (video-to-video / edit
+  //    models, whose source is a video embed rather than an image).
   useEffect(() => {
     if (editedPrompt || !hasPromptField) return;
     let mounted = true;
@@ -149,6 +236,10 @@ export function ImageGenScreen({ model }: { model: FalModel }) {
         const notes = await getConnectedStickyNotes(sourceImage.id);
         text = notes.map((n) => n.content).filter(Boolean).join('\n');
         anchorId = notes[0]?.id;
+      } else if (sourceVideo) {
+        const notes = await getConnectedStickyNotes(sourceVideo.id);
+        text = notes.map((n) => n.content).filter(Boolean).join('\n');
+        anchorId = notes[0]?.id;
       }
       if (!mounted) return;
       setPromptStickyId(anchorId);
@@ -157,12 +248,12 @@ export function ImageGenScreen({ model }: { model: FalModel }) {
     return () => {
       mounted = false;
     };
-  }, [orderedStickies, sourceImage, editedPrompt, hasPromptField]);
+  }, [orderedStickies, sourceImage, sourceVideo, editedPrompt, hasPromptField]);
 
   // Count the reference images that will be sent.
   useEffect(() => {
     let mounted = true;
-    const anchor = imagePrimary ? sourceImage?.id : orderedStickies[0]?.id;
+    const anchor = imagePrimary ? effectiveSourceImage?.id : orderedStickies[0]?.id;
     if (!referenceField || !anchor) {
       setRefCount(0);
       return;
@@ -172,14 +263,16 @@ export function ImageGenScreen({ model }: { model: FalModel }) {
         if (!mounted) return;
         // image-primary: the selected image itself + any others connected to it.
         const base = imagePrimary ? 1 : 0;
-        const extras = imagePrimary ? imgs.filter((i) => i.miroImageId !== sourceImage?.id).length : imgs.length;
+        const extras = imagePrimary
+          ? imgs.filter((i) => i.miroImageId !== effectiveSourceImage?.id).length
+          : imgs.length;
         setRefCount(base + extras);
       })
       .catch(() => mounted && setRefCount(imagePrimary ? 1 : 0));
     return () => {
       mounted = false;
     };
-  }, [imagePrimary, sourceImage, orderedStickies, referenceField]);
+  }, [imagePrimary, effectiveSourceImage, orderedStickies, referenceField]);
 
   // Load the board's asset-naming config once.
   useEffect(() => {
@@ -210,12 +303,20 @@ export function ImageGenScreen({ model }: { model: FalModel }) {
 
   const onGenerate = () => {
     setNote(null);
-    if (imageRequired && takesMulti && selectedImages.length === 0) {
+    if (imageRequired && takesMulti && effectiveSelectedImages.length === 0) {
       setNote('Select one or more images on the board (shift-click to add several).');
       return;
     }
-    if (imageRequired && takesSingle && !sourceImage) {
+    if (imageRequired && takesSingle && !effectiveSourceImage) {
       setNote('Select an image on the board to use as the source.');
+      return;
+    }
+    if (videoRequired && takesMultiVideo && effectiveSelectedVideos.length === 0) {
+      setNote('Select one or more Fal videos on the board (shift-click to add several).');
+      return;
+    }
+    if (videoRequired && takesSingleVideo && !effectiveSourceVideo) {
+      setNote('Select a Fal video on the board to use as the source clip.');
       return;
     }
     if (multiView) {
@@ -241,7 +342,8 @@ export function ImageGenScreen({ model }: { model: FalModel }) {
     if (
       (!input.prompt || typeof input.prompt !== 'string') &&
       orderedStickies.length === 0 &&
-      !imagePrimary
+      !imagePrimary &&
+      !videoPrimary
     ) {
       setNote('Type a prompt or select one or more sticky notes first.');
       return;
@@ -260,15 +362,20 @@ export function ImageGenScreen({ model }: { model: FalModel }) {
       payload: {
         endpointId: model.endpointId,
         stickyId: promptStickyId ?? orderedStickies[0]?.id,
-        sourceImageId: takesSingle ? sourceImage?.id : undefined,
-        sourceImageIds: takesMulti ? selectedImages.map((s) => s.id) : undefined,
+        sourceImageId: takesSingle ? effectiveSourceImage?.id : undefined,
+        sourceImageIds: takesMulti ? effectiveSelectedImages.map((s) => s.id) : undefined,
+        sourceVideoId: takesSingleVideo ? effectiveSourceVideo?.id : undefined,
+        sourceVideoIds: takesMultiVideo ? effectiveSelectedVideos.map((s) => s.id) : undefined,
         placeholderRatio: ratioFromValues(values),
         input,
         ...(usesImageAgent && assetName.trim() ? { assetName: assetName.trim() } : {}),
+        ...(usesImageAgent && referenceFrameId ? { referenceFrameId } : {}),
         ...(referenceField && !multiView ? { referenceField } : {}),
+        ...(videoReferenceField && !multiView ? { videoReferenceField } : {}),
         ...(multiView
           ? { viewImages: viewFields.filter((f) => views[f.name]).map((f) => ({ field: f.name, imageId: views[f.name].id })) }
           : {}),
+        ...(seed ? { cardAnchorId: seed.cardId } : {}),
       },
     });
     setNote(
@@ -280,6 +387,66 @@ export function ImageGenScreen({ model }: { model: FalModel }) {
             ? 'Building panorama — an interactive 360° viewer will drop on the board when it’s ready.'
             : 'Generation started — watch the board (and the tray above).',
     );
+  };
+
+  // Snapshot the model + current inputs as a board Card ("settings card") —
+  // connected to whatever fed this screen (images/video/prompt stickies) so a
+  // future reopen can detect and re-resolve them. Multi-view (3D) recipes skip
+  // the reference fields for now — view-slot assignments aren't captured yet.
+  const onSaveCard = async () => {
+    setNote(null);
+    let input: Record<string, unknown>;
+    try {
+      input = buildInput(fields, values);
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : 'Invalid input.');
+      return;
+    }
+
+    const recipe: RecipeCard = {
+      v: RECIPE_CARD_VERSION,
+      endpointId: model.endpointId,
+      capability: model.capability,
+      input,
+      referenceField: !multiView ? referenceField : null,
+      videoReferenceField: !multiView ? videoReferenceField : null,
+    };
+
+    const connectIds: string[] = [];
+    if (takesSingle && effectiveSourceImage) connectIds.push(effectiveSourceImage.id);
+    if (takesMulti) connectIds.push(...effectiveSelectedImages.map((s) => s.id));
+    if (takesSingleVideo && effectiveSourceVideo) connectIds.push(effectiveSourceVideo.id);
+    if (takesMultiVideo) connectIds.push(...effectiveSelectedVideos.map((s) => s.id));
+    connectIds.push(...orderedStickies.map((s) => s.id));
+
+    // A selected frame's contents count as connected too (mirrors how a
+    // connected frame is expanded when reopening a card).
+    try {
+      const sel = (await miro.board.getSelection()) as Array<{ id: string; type: string }>;
+      const frameIds = sel.filter((s) => s.type === 'frame').map((s) => s.id);
+      if (frameIds.length) {
+        const expanded = await resolveBoardItems(frameIds);
+        connectIds.push(
+          ...expanded.images.map((i) => i.id),
+          ...expanded.videos.map((v) => v.id),
+          ...expanded.stickies.map((s) => s.id),
+        );
+      }
+    } catch (e) {
+      console.warn('[ImageGenScreen] frame expansion for save failed', e);
+    }
+
+    try {
+      const { id: cardId } = await createCardBelow({
+        sourceItemId: connectIds[0],
+        title: `Settings · ${model.label}`,
+        description: serializeRecipeCard(recipe),
+      });
+      if (connectIds.length) await connectItemsToCard(connectIds, cardId);
+      setNote('Saved as a settings card on the board.');
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : 'Failed to save settings card.');
+    }
   };
 
   return (
@@ -304,11 +471,11 @@ export function ImageGenScreen({ model }: { model: FalModel }) {
           {/* Single-image field: one source image from the selection (required
               subject, or an optional reference for a generator). */}
           {takesSingle && (
-            <div className={`source-image ${sourceImage ? 'chosen' : ''}`}>
-              {sourceImage ? (
+            <div className={`source-image ${effectiveSourceImage ? 'chosen' : ''}`}>
+              {effectiveSourceImage ? (
                 <>
                   <span className="check">✓</span> Using selected image
-                  {sourceImage.title ? <span className="src-title"> · {sourceImage.title}</span> : null}
+                  {effectiveSourceImage.title ? <span className="src-title"> · {effectiveSourceImage.title}</span> : null}
                 </>
               ) : imageRequired ? (
                 <>Select an image on the board to use as the source.</>
@@ -320,14 +487,14 @@ export function ImageGenScreen({ model }: { model: FalModel }) {
 
           {/* Image-array field: every selected board image becomes a reference. */}
           {takesMulti && (
-            <div className={`source-image ${selectedImages.length ? 'chosen' : ''}`}>
-              {selectedImages.length ? (
+            <div className={`source-image ${effectiveSelectedImages.length ? 'chosen' : ''}`}>
+              {effectiveSelectedImages.length ? (
                 <>
-                  <span className="check">✓</span> {selectedImages.length} image
-                  {selectedImages.length === 1 ? '' : 's'} selected → sent as <code>{referenceField?.name}</code>
-                  {selectedImages.some((s) => s.title) && (
+                  <span className="check">✓</span> {effectiveSelectedImages.length} image
+                  {effectiveSelectedImages.length === 1 ? '' : 's'} selected → sent as <code>{referenceField?.name}</code>
+                  {effectiveSelectedImages.some((s) => s.title) && (
                     <div className="src-title" style={{ marginTop: 4 }}>
-                      {selectedImages.map((s) => s.title || '(untitled)').join(', ')}
+                      {effectiveSelectedImages.map((s) => s.title || '(untitled)').join(', ')}
                     </div>
                   )}
                 </>
@@ -335,6 +502,44 @@ export function ImageGenScreen({ model }: { model: FalModel }) {
                 <>Select one or more images on the board (shift-click to add several). Name them to reference them in the prompt.</>
               ) : (
                 <>Optional: select board images to send as <code>{referenceField?.name}</code> references (shift-click for several).</>
+              )}
+            </div>
+          )}
+
+          {/* Single-video field: video-to-video / edit models whose source is a
+              Fal video already on the board (e.g. Google Omni Video Edit). */}
+          {takesSingleVideo && (
+            <div className={`source-image ${effectiveSourceVideo ? 'chosen' : ''}`}>
+              {effectiveSourceVideo ? (
+                <>
+                  <span className="check">✓</span> Using selected video
+                  {effectiveSourceVideo.title ? <span className="src-title"> · {effectiveSourceVideo.title}</span> : null}
+                </>
+              ) : videoRequired ? (
+                <>Select a Fal video on the board to use as the source.</>
+              ) : (
+                <>Optional: select a Fal video on the board to send as <code>{videoReferenceField?.name}</code>.</>
+              )}
+            </div>
+          )}
+
+          {/* Video-array field: every selected Fal video embed becomes a reference. */}
+          {takesMultiVideo && (
+            <div className={`source-image ${effectiveSelectedVideos.length ? 'chosen' : ''}`}>
+              {effectiveSelectedVideos.length ? (
+                <>
+                  <span className="check">✓</span> {effectiveSelectedVideos.length} video
+                  {effectiveSelectedVideos.length === 1 ? '' : 's'} selected → sent as <code>{videoReferenceField?.name}</code>
+                  {effectiveSelectedVideos.some((s) => s.title) && (
+                    <div className="src-title" style={{ marginTop: 4 }}>
+                      {effectiveSelectedVideos.map((s) => s.title || '(untitled)').join(', ')}
+                    </div>
+                  )}
+                </>
+              ) : videoRequired ? (
+                <>Select one or more Fal videos on the board (shift-click to add several).</>
+              ) : (
+                <>Optional: select Fal videos on the board to send as <code>{videoReferenceField?.name}</code> references (shift-click for several).</>
               )}
             </div>
           )}
@@ -387,9 +592,10 @@ export function ImageGenScreen({ model }: { model: FalModel }) {
             hide={
               multiView
                 ? viewFields.map((f) => f.name)
-                : (takesSingle || takesMulti) && referenceField
-                  ? [referenceField.name]
-                  : []
+                : [
+                    ...((takesSingle || takesMulti) && referenceField ? [referenceField.name] : []),
+                    ...((takesSingleVideo || takesMultiVideo) && videoReferenceField ? [videoReferenceField.name] : []),
+                  ]
             }
           />
 
@@ -436,24 +642,32 @@ export function ImageGenScreen({ model }: { model: FalModel }) {
             model={model}
             values={values}
             imagePrimary={imagePrimary}
-            sourceImage={sourceImage}
+            sourceImage={effectiveSourceImage}
             referenceField={referenceField}
             refCount={refCount}
+            videoReferenceField={videoReferenceField}
+            sourceVideo={effectiveSourceVideo}
+            videoCount={takesMultiVideo ? effectiveSelectedVideos.length : effectiveSourceVideo ? 1 : 0}
             views={multiView ? viewFields.filter((f) => views[f.name]).map((f) => f.label) : null}
             assetName={usesImageAgent && assetName.trim() ? assetName.trim() : null}
           />
 
-          <button type="button" className="primary" onClick={onGenerate}>
-            {isPanorama
-              ? 'Generate panorama'
-              : is3d
-                ? 'Generate 3D model'
-                : isVideo
-                  ? 'Generate video'
-                  : isSegment
-                    ? 'Extract object'
-                    : 'Generate image'}
-          </button>
+          <div className="button-row">
+            <button type="button" className="secondary" onClick={onSaveCard}>
+              Save as settings card
+            </button>
+            <button type="button" className="primary" onClick={onGenerate}>
+              {isPanorama
+                ? 'Generate panorama'
+                : is3d
+                  ? 'Generate 3D model'
+                  : isVideo
+                    ? 'Generate video'
+                    : isSegment
+                      ? 'Extract object'
+                      : 'Generate image'}
+            </button>
+          </div>
         </>
       )}
 
@@ -647,6 +861,9 @@ function RequestPreview({
   sourceImage,
   referenceField,
   refCount,
+  videoReferenceField,
+  sourceVideo,
+  videoCount,
   views,
   assetName,
 }: {
@@ -656,6 +873,9 @@ function RequestPreview({
   sourceImage: ImageItem | null;
   referenceField: { name: string; multiple: boolean; required: boolean } | null;
   refCount: number;
+  videoReferenceField: { name: string; multiple: boolean; required: boolean } | null;
+  sourceVideo: EmbedItem | null;
+  videoCount: number;
   views: string[] | null;
   assetName: string | null;
 }) {
@@ -696,6 +916,20 @@ function RequestPreview({
               </span>
             </div>
           )
+        )}
+        {videoReferenceField && (
+          <div>
+            <span className="k">Video</span>
+            <span className="v">
+              {videoReferenceField.multiple
+                ? videoCount > 0
+                  ? `${videoCount} → ${videoReferenceField.name}`
+                  : 'none'
+                : sourceVideo
+                  ? `source → ${videoReferenceField.name}`
+                  : 'none selected'}
+            </span>
+          </div>
         )}
         <div>
           <span className="k">Prompt</span>

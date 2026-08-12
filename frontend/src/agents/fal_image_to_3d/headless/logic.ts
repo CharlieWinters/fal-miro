@@ -11,6 +11,7 @@ import {
   parseRatio,
   replaceImageContent,
   resolveAbsolutePosition,
+  resolvePlaceholderAnchor,
 } from '../../../shared/boardHelpers';
 import {
   addActiveJob,
@@ -37,6 +38,9 @@ export type ImageTo3dPayload = {
    * precedence over `referenceField` when present.
    */
   viewImages?: Array<{ field: string; imageId: string }>;
+  /** The settings card this run was started from, if reopened from one — the
+   *  output places beside it instead of below the usual source anchor. */
+  cardAnchorId?: string;
 };
 
 export type ImageTo3dResult = {
@@ -54,6 +58,7 @@ export async function run(payload: unknown, requestId = ''): Promise<ImageTo3dRe
     placeholderRatio,
     referenceField,
     viewImages = [],
+    cardAnchorId,
   } = (payload ?? {}) as ImageTo3dPayload;
 
   if (!endpointId) throw new Error('endpointId is required');
@@ -109,11 +114,13 @@ export async function run(payload: unknown, requestId = ''): Promise<ImageTo3dRe
   if (!ratio) ratio = '1:1';
 
   broadcastUpdate({ requestId, status: 'queued', message: 'Placing placeholder…' });
+  const { anchorId: placementAnchor, side } = await resolvePlaceholderAnchor(cardAnchorId, anchorImageId ?? stickyId);
   const { id: placeholderId, x: targetX, y: targetY } = await createImageBelow({
-    sourceItemId: anchorImageId ?? stickyId,
+    sourceItemId: placementAnchor,
     url: makePlaceholderDataUrl(ratio, 'Generating 3D…'),
     ratio,
     title: 'Fal · Generating 3D',
+    side,
   });
 
   // Submit.

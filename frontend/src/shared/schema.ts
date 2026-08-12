@@ -10,6 +10,8 @@ export type FieldKind =
   | 'boolean'
   | 'enum'
   | 'image' // an image URL input (can be fed from the board)
+  | 'video' // a video URL input (can be fed from a board video embed)
+  | 'audio' // an audio URL input (can be fed from a board audio embed)
   | 'json'; // object/array/unknown — raw JSON for power users
 
 export type Field = {
@@ -24,6 +26,10 @@ export type Field = {
   max?: number;
   /** For `image` fields: true when it takes an array (e.g. `image_urls`). */
   imageMultiple?: boolean;
+  /** For `video` fields: true when it takes an array (e.g. `video_urls`). */
+  videoMultiple?: boolean;
+  /** For `audio` fields: true when it takes an array (e.g. `audio_urls`). */
+  audioMultiple?: boolean;
 };
 
 type AnySchema = Record<string, any>;
@@ -86,6 +92,22 @@ function isImageField(name: string, prop: AnySchema): boolean {
   return fmt === 'uri' && /(image|frame)/i.test(name);
 }
 
+function isVideoField(name: string, prop: AnySchema): boolean {
+  // Matches video_url(s), input_video_url, reference_video_url, etc.
+  if (/(^|_)video(_urls?)?$/i.test(name)) return true;
+  const fmt = prop.format;
+  return fmt === 'uri' && /video/i.test(name);
+}
+
+function isAudioField(name: string, prop: AnySchema): boolean {
+  // Matches audio_url(s), input_audio_url, reference_audio_url, etc. — the
+  // same naming convention Fal uses for image/video reference fields (e.g.
+  // Seedance 2.5's `audio_urls`).
+  if (/(^|_)audio(_urls?)?$/i.test(name)) return true;
+  const fmt = prop.format;
+  return fmt === 'uri' && /audio/i.test(name);
+}
+
 function titleFrom(name: string, prop: AnySchema): string {
   if (typeof prop.title === 'string' && prop.title.trim()) return prop.title;
   return name
@@ -112,6 +134,16 @@ function classify(root: AnySchema, name: string, rawProp: AnySchema, required: b
   if (isImageField(name, prop)) {
     const multiple = primitiveType(root, prop) === 'array' || /urls$/i.test(name);
     return { ...base, kind: 'image', imageMultiple: multiple };
+  }
+
+  if (isVideoField(name, prop)) {
+    const multiple = primitiveType(root, prop) === 'array' || /urls$/i.test(name);
+    return { ...base, kind: 'video', videoMultiple: multiple };
+  }
+
+  if (isAudioField(name, prop)) {
+    const multiple = primitiveType(root, prop) === 'array' || /urls$/i.test(name);
+    return { ...base, kind: 'audio', audioMultiple: multiple };
   }
 
   const type = primitiveType(root, prop);
@@ -223,6 +255,101 @@ export function pickReferenceField(
     candidates.find((f) => f.required) ??
     candidates[0];
   return { name: chosen.name, multiple: Boolean(chosen.imageMultiple), required: chosen.required };
+}
+
+/**
+ * Pick the field that a board-selected video should flow into (video-to-video /
+ * video-edit models, e.g. Google Omni Video Edit's `video_url`). Same
+ * preference order as `pickReferenceField`, mirrored for video fields.
+ */
+export function pickVideoReferenceField(
+  fields: Field[],
+): { name: string; multiple: boolean; required: boolean } | null {
+  const candidates = fields.filter((f) => f.kind === 'video');
+  if (candidates.length === 0) return null;
+  const preferred = ['video_urls', 'video_url', 'input_video_url'];
+  const chosen =
+    preferred.map((n) => candidates.find((f) => f.name === n)).find(Boolean) ??
+    candidates.find((f) => f.required) ??
+    candidates[0];
+  return { name: chosen.name, multiple: Boolean(chosen.videoMultiple), required: chosen.required };
+}
+
+/**
+ * Pick the field that a board-selected audio clip should flow into (e.g.
+ * Seedance 2.5's `audio_urls`). Same preference order as
+ * `pickReferenceField`/`pickVideoReferenceField` — this is the schema-driven
+ * check for "does this model take audio references at all", so the board
+ * only offers/collects audio for models that actually declare such a field.
+ */
+export function pickAudioReferenceField(
+  fields: Field[],
+): { name: string; multiple: boolean; required: boolean } | null {
+  const candidates = fields.filter((f) => f.kind === 'audio');
+  if (candidates.length === 0) return null;
+  const preferred = ['audio_urls', 'audio_url', 'input_audio_url'];
+  const chosen =
+    preferred.map((n) => candidates.find((f) => f.name === n)).find(Boolean) ??
+    candidates.find((f) => f.required) ??
+    candidates[0];
+  return { name: chosen.name, multiple: Boolean(chosen.audioMultiple), required: chosen.required };
+}
+
+// Fal's named-bucket size convention (e.g. FLUX's `image_size`), as an
+// alternative to a plain "W:H" `aspect_ratio` field. Maps a bucket name to the
+// ratio it represents — the same table ImageGenScreen/ReferenceToVideoScreen
+// use client-side to read a *chosen* size back into a ratio.
+const IMAGE_SIZE_RATIOS: Record<string, string> = {
+  square: '1:1',
+  square_hd: '1:1',
+  landscape_4_3: '4:3',
+  landscape_16_9: '16:9',
+  portrait_4_3: '3:4',
+  portrait_16_9: '9:16',
+};
+
+export type AspectRatioField = {
+  name: string;
+  /** The field's own value for a given "W:H" ratio, or null if this field
+   *  can't represent that ratio (e.g. an enum that has no matching option). */
+  valueForRatio: (ratio: string) => string | null;
+};
+
+/**
+ * Find the model's aspect-ratio-shaped input field, schema-driven — either a
+ * literal `aspect_ratio` field (values are "W:H" strings, e.g. Seedance) or an
+ * `image_size` field using Fal's named-bucket convention (e.g. FLUX's
+ * `landscape_16_9`). Returns null if the model has neither, so a caller can
+ * skip overriding anything instead of guessing at a value shape that doesn't
+ * apply. Used to push a frame-derived ratio into the actual generation
+ * request — not just the placeholder's on-board size.
+ */
+export function pickAspectRatioField(fields: Field[]): AspectRatioField | null {
+  const ratioField = fields.find((f) => f.name === 'aspect_ratio');
+  if (ratioField) {
+    const enumValues = ratioField.kind === 'enum' ? ratioField.enumValues ?? [] : null;
+    return {
+      name: 'aspect_ratio',
+      valueForRatio: (ratio) => {
+        if (!enumValues) return ratio; // free-form string field — pass it through
+        return enumValues.some((v) => String(v) === ratio) ? ratio : null;
+      },
+    };
+  }
+
+  const sizeField = fields.find((f) => f.name === 'image_size');
+  if (sizeField?.kind === 'enum' && sizeField.enumValues) {
+    const enumValues = sizeField.enumValues;
+    return {
+      name: 'image_size',
+      valueForRatio: (ratio) => {
+        const bucket = Object.entries(IMAGE_SIZE_RATIOS).find(([, r]) => r === ratio)?.[0];
+        return bucket && enumValues.some((v) => String(v) === bucket) ? bucket : null;
+      },
+    };
+  }
+
+  return null;
 }
 
 /**

@@ -38,8 +38,13 @@ export async function placeGenericOutput(opts: {
   ratio: string;
   url: string;
   title?: string;
+  /** Exact embed size to use instead of deriving from `ratio` — e.g. a
+   *  frame-anchored placement, so the final embed keeps the placeholder's
+   *  actual (frame-matched) size instead of reverting to the ratio's default
+   *  (720px-capped) dimensions. */
+  size?: { width: number; height: number };
 }): Promise<{ itemId: string; kind: OutputKind }> {
-  const { placeholderId, targetPosition, ratio, url, title = 'Fal · Generated' } = opts;
+  const { placeholderId, targetPosition, ratio, url, title = 'Fal · Generated', size } = opts;
   const kind = classifyOutput(url);
 
   if (kind === 'image') {
@@ -50,7 +55,7 @@ export async function placeGenericOutput(opts: {
   // Embed-based: keep the placeholder's current spot, swap it for an embed.
   // Media (video / 3D) keeps the aspect ratio; audio / link get a compact bar.
   const isMedia = kind === 'video' || kind === 'model3d';
-  const { width, height } = isMedia ? parseRatio(ratio, 720) : { width: 480, height: 140 };
+  const { width, height } = isMedia ? size ?? parseRatio(ratio, 720) : { width: 480, height: 140 };
   const abs = await resolveAbsolutePosition(placeholderId);
   const x = abs?.absoluteX ?? targetPosition?.x ?? 0;
   const y = abs?.absoluteY ?? targetPosition?.y ?? 0;

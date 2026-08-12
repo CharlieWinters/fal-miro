@@ -1,10 +1,16 @@
 import { api, type StatusResponse } from '../../../lib/api';
 import {
+  createImageAtAbsolute,
   createImageBelow,
   getImageAspectRatio,
   getImageRef,
+  getVideoRef,
   makePlaceholderDataUrl,
   replaceImageContent,
+  resolveAbsolutePosition,
+  resolveBelowFrameBox,
+  resolvePlaceholderAnchor,
+  snapFrameRatio,
 } from '../../../shared/boardHelpers';
 import {
   addActiveJob,
@@ -14,6 +20,7 @@ import {
 } from '../../../shared/storage';
 import { placeGenericOutput, type OutputKind } from '../../../shared/genericOutput';
 import { estimateCostUSD, reportedInferenceSeconds } from '../../../shared/cost';
+import { parseFalInputSchema, pickAspectRatioField } from '../../../shared/schema';
 import { broadcastUpdate } from '../../../headless/communications';
 
 /**
@@ -27,9 +34,19 @@ export type GenericGenPayload = {
   input: Record<string, unknown>;
   /** Board images to resolve into named schema fields (URLs, in order). */
   imageFields?: Array<{ field: string; itemIds: string[]; multiple: boolean }>;
+  /** Board Fal-video embeds to resolve into named schema fields (URLs, in order). */
+  videoFields?: Array<{ field: string; itemIds: string[]; multiple: boolean }>;
   /** Sticky driving the prompt/placement (optional; for lineage). */
   stickyId?: string;
   placeholderRatio?: string;
+  /** The settings card this run was started from, if reopened from one — the
+   *  output places beside it instead of below the usual source anchor. */
+  cardAnchorId?: string;
+  /** The frame the references were collected from, if any — takes placement
+   *  priority over `cardAnchorId`: the output goes directly below this frame,
+   *  sized to match its width (ratio snapped to the frame's own shape when
+   *  it's close to a logical one, see `snapFrameRatio`). */
+  referenceFrameId?: string;
 };
 
 export type GenericGenResult = {
@@ -44,8 +61,11 @@ export async function run(payload: unknown, requestId = ''): Promise<GenericGenR
     endpointId,
     input = {},
     imageFields = [],
+    videoFields = [],
     stickyId,
     placeholderRatio,
+    cardAnchorId,
+    referenceFrameId,
   } = (payload ?? {}) as GenericGenPayload;
 
   if (!endpointId) throw new Error('endpointId is required');
@@ -72,17 +92,79 @@ export async function run(payload: unknown, requestId = ''): Promise<GenericGenR
     }
   }
 
+  // Resolve board Fal-video embeds into their schema fields (array or single URL).
+  if (videoFields.length) {
+    broadcastUpdate({ requestId, status: 'queued', message: 'Reading board videos…' });
+    for (const f of videoFields) {
+      const urls: string[] = [];
+      for (const id of f.itemIds) {
+        const r = await getVideoRef(id);
+        if (r) {
+          urls.push(r.url);
+          parents.add(id);
+          if (!anchorId) anchorId = id;
+        }
+      }
+      if (urls.length) finalInput[f.field] = f.multiple ? urls : urls[0];
+    }
+  }
+
   let ratio = placeholderRatio;
   if (!ratio && anchorId) ratio = (await getImageAspectRatio(anchorId)) ?? undefined;
   if (!ratio) ratio = '1:1';
 
+  // If the references came from a frame, that frame takes placement priority:
+  // the output goes directly below it, sized to match its width, ratio
+  // snapped to the frame's own shape when that's close to a logical one.
+  let placementBox: { x: number; y: number; width: number; height: number } | null = null;
+  if (referenceFrameId) {
+    const frame = await resolveAbsolutePosition(referenceFrameId);
+    if (frame?.width && frame?.height) {
+      const snapped = snapFrameRatio(frame.width, frame.height);
+      if (snapped) {
+        ratio = snapped;
+        // Also feed the frame's shape into the actual generation request —
+        // otherwise Fal generates at whatever ratio the form had, and the
+        // mismatched result gets cropped to fit the frame-sized placeholder.
+        try {
+          const schemaRes = await api.getSchema(endpointId);
+          const aspectField = pickAspectRatioField(parseFalInputSchema(schemaRes.openapi));
+          const value = aspectField?.valueForRatio(snapped);
+          if (aspectField && value) finalInput[aspectField.name] = value;
+        } catch (e) {
+          console.warn('[fal_generic] aspect-ratio override failed', e);
+        }
+      }
+      placementBox = await resolveBelowFrameBox(referenceFrameId, ratio);
+    }
+  }
+
   broadcastUpdate({ requestId, status: 'queued', message: 'Placing placeholder…' });
-  const { id: placeholderId, x: targetX, y: targetY } = await createImageBelow({
-    sourceItemId: anchorId,
-    url: makePlaceholderDataUrl(ratio, 'Generating…'),
-    ratio,
-    title: 'Fal · Generating',
-  });
+  let placeholderId: string, targetX: number, targetY: number;
+  if (placementBox) {
+    const placed = await createImageAtAbsolute({
+      url: makePlaceholderDataUrl(ratio, 'Generating…'),
+      x: placementBox.x,
+      y: placementBox.y,
+      width: placementBox.width,
+      title: 'Fal · Generating',
+    });
+    placeholderId = placed.id;
+    targetX = placed.x;
+    targetY = placed.y;
+  } else {
+    const { anchorId: placementAnchor, side } = await resolvePlaceholderAnchor(cardAnchorId, anchorId);
+    const placed = await createImageBelow({
+      sourceItemId: placementAnchor,
+      url: makePlaceholderDataUrl(ratio, 'Generating…'),
+      ratio,
+      side,
+      title: 'Fal · Generating',
+    });
+    placeholderId = placed.id;
+    targetX = placed.x;
+    targetY = placed.y;
+  }
 
   broadcastUpdate({ requestId, status: 'running', message: 'Submitting to Fal…' });
   let falRequestId: string;
@@ -153,6 +235,7 @@ export async function run(payload: unknown, requestId = ''): Promise<GenericGenR
       targetPosition: { x: targetX, y: targetY },
       ratio,
       url: outputUrl,
+      ...(placementBox ? { size: { width: placementBox.width, height: placementBox.height } } : {}),
     });
     const measured = runStartedAt ? (Date.now() - runStartedAt) / 1000 : undefined;
     settings.costUSD = await estimateCostUSD(endpointId, {

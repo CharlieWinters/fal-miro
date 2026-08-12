@@ -1,5 +1,6 @@
 import { api, type StatusResponse } from '../../../lib/api';
 import {
+  createImageAtAbsolute,
   createImageBelow,
   getConnectedReferenceImages,
   getImageAspectRatio,
@@ -8,6 +9,10 @@ import {
   getStickyText,
   makePlaceholderDataUrl,
   replaceImageContent,
+  resolveAbsolutePosition,
+  resolveBelowFrameBox,
+  resolvePlaceholderAnchor,
+  snapFrameRatio,
 } from '../../../shared/boardHelpers';
 import {
   addActiveJob,
@@ -17,6 +22,7 @@ import {
   type GenSettings,
 } from '../../../shared/storage';
 import { bindReferences, type Ref } from '../../../shared/referenceBinding';
+import { parseFalInputSchema, pickAspectRatioField } from '../../../shared/schema';
 import { broadcastUpdate } from '../../../headless/communications';
 
 export type ImageGenPayload = {
@@ -49,6 +55,14 @@ export type ImageGenPayload = {
    * the model has no image input.
    */
   referenceField?: { name: string; multiple: boolean };
+  /** The settings card this run was started from, if reopened from one — the
+   *  output places beside it instead of below the usual source anchor. */
+  cardAnchorId?: string;
+  /** The frame the references were collected from, if any — takes placement
+   *  priority over `cardAnchorId`: the output goes directly below this frame,
+   *  sized to match its width (ratio snapped to the frame's own shape when
+   *  it's close to a logical one, see `snapFrameRatio`). */
+  referenceFrameId?: string;
 };
 
 export type ImageGenResult = {
@@ -67,6 +81,8 @@ export async function run(payload: unknown, requestId = ''): Promise<ImageGenRes
     placeholderRatio,
     referenceField,
     assetName,
+    cardAnchorId,
+    referenceFrameId,
   } = (payload ?? {}) as ImageGenPayload;
 
   if (!endpointId) throw new Error('endpointId is required');
@@ -153,21 +169,67 @@ export async function run(payload: unknown, requestId = ''): Promise<ImageGenRes
   }
   if (!ratio) ratio = '1:1';
 
+  // If the references came from a frame, that frame takes placement priority:
+  // the output goes directly below it, sized to match its width, ratio
+  // snapped to the frame's own shape when that's close to a logical one.
+  let placementBox: { x: number; y: number; width: number; height: number } | null = null;
+  if (referenceFrameId) {
+    const frame = await resolveAbsolutePosition(referenceFrameId);
+    if (frame?.width && frame?.height) {
+      const snapped = snapFrameRatio(frame.width, frame.height);
+      if (snapped) {
+        ratio = snapped;
+        // Also feed the frame's shape into the actual generation request —
+        // otherwise Fal generates at whatever ratio the form had, and the
+        // mismatched result gets cropped to fit the frame-sized placeholder.
+        try {
+          const schemaRes = await api.getSchema(endpointId);
+          const aspectField = pickAspectRatioField(parseFalInputSchema(schemaRes.openapi));
+          const value = aspectField?.valueForRatio(snapped);
+          if (aspectField && value) finalInput[aspectField.name] = value;
+        } catch (e) {
+          console.warn('[fal_image_gen] aspect-ratio override failed', e);
+        }
+      }
+      placementBox = await resolveBelowFrameBox(referenceFrameId, ratio);
+    }
+  }
+
   // Offset parallel generations from the same sticky so they don't stack.
   const activeBefore = await getActiveJobs();
   const siblingOffsetIndex = stickyId
     ? activeBefore.filter((j) => j.settings.sourceStickyId === stickyId).length
     : 0;
 
-  // 1. Drop a placeholder below the sticky.
+  // 1. Drop a placeholder below the reference frame (if any), else below the
+  //    sticky (or beside the settings card, if this run was started from one).
   broadcastUpdate({ requestId, status: 'queued', message: 'Placing placeholder…' });
-  const { id: placeholderId, x: targetX, y: targetY } = await createImageBelow({
-    sourceItemId: anchorImageId ?? stickyId,
-    url: makePlaceholderDataUrl(ratio, 'Generating image…'),
-    ratio,
-    title: 'Fal · Generating',
-    siblingOffsetIndex,
-  });
+  let placeholderId: string, targetX: number, targetY: number;
+  if (placementBox) {
+    const placed = await createImageAtAbsolute({
+      url: makePlaceholderDataUrl(ratio, 'Generating image…'),
+      x: placementBox.x,
+      y: placementBox.y,
+      width: placementBox.width,
+      title: 'Fal · Generating',
+    });
+    placeholderId = placed.id;
+    targetX = placed.x;
+    targetY = placed.y;
+  } else {
+    const { anchorId: placementAnchor, side } = await resolvePlaceholderAnchor(cardAnchorId, anchorImageId ?? stickyId);
+    const placed = await createImageBelow({
+      sourceItemId: placementAnchor,
+      url: makePlaceholderDataUrl(ratio, 'Generating image…'),
+      ratio,
+      title: 'Fal · Generating',
+      siblingOffsetIndex,
+      side,
+    });
+    placeholderId = placed.id;
+    targetX = placed.x;
+    targetY = placed.y;
+  }
 
   // 2. Submit to Fal's queue via the backend.
   broadcastUpdate({ requestId, status: 'running', message: 'Submitting to Fal…' });

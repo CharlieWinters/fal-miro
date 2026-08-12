@@ -1,13 +1,28 @@
 import { useEffect, useMemo, useState } from 'react';
 import { startAgentJob } from '../communication';
 import { SchemaForm } from '../SchemaForm';
-import { api } from '../../lib/api';
+import { api, unwrapVideoEmbedUrl } from '../../lib/api';
+import { connectItemsToCard, createCardBelow, resolveBoardItems } from '../../shared/boardHelpers';
+import {
+  RECIPE_CARD_VERSION,
+  resolveStickyFieldOverrides,
+  serializeRecipeCard,
+  type RecipeCard,
+  type RecipeSeed,
+} from '../../shared/recipeCard';
 import { COMMON_ARGS, type FalModel } from '../../shared/falCatalog';
-import { parseFalInputSchema, defaultsFor, pickReferenceField, type Field } from '../../shared/schema';
+import {
+  parseFalInputSchema,
+  defaultsFor,
+  pickReferenceField,
+  pickVideoReferenceField,
+  type Field,
+} from '../../shared/schema';
 import { useBoardReferences, useFirstSelected, useSelectedStickyText } from '../hooks/boardInputs';
 import { ModelMetaChips } from '../ModelMetaChips';
 
 type ImageItem = { id: string; title?: string };
+type EmbedItem = { id: string; url?: string; title?: string };
 
 type SchemaState =
   | { status: 'loading' }
@@ -22,7 +37,7 @@ const PROMPT_FALLBACK: Field[] = [{ name: 'prompt', label: 'Prompt', kind: 'text
  * field ← selected image(s), the prompt ← selected stickies. Output (image /
  * video / 3D / link) is placed by the fal_generic agent.
  */
-export function GenericModelScreen({ model }: { model: FalModel }) {
+export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: RecipeSeed | null }) {
   const [schema, setSchema] = useState<SchemaState>({ status: 'loading' });
   const [meta, setMeta] = useState<Record<string, unknown> | null>(null);
   const [values, setValues] = useState<Record<string, unknown>>({});
@@ -30,8 +45,25 @@ export function GenericModelScreen({ model }: { model: FalModel }) {
   const [note, setNote] = useState<string | null>(null);
 
   const sourceImage = useFirstSelected<ImageItem>('image');
+  const rawSourceVideo = useFirstSelected<EmbedItem>('embed');
   const boardRefs = useBoardReferences();
   const sticky = useSelectedStickyText();
+
+  // A reopened settings card's connected ids — fallback source until the user
+  // selects something directly on the board themselves.
+  const [seedRefs, setSeedRefs] = useState<{
+    images: Array<{ id: string; title?: string }>;
+    videos: Array<{ id: string; title?: string }>;
+  } | null>(null);
+  useEffect(() => {
+    if (!seed) return;
+    setSeedRefs({ images: seed.images, videos: seed.videos });
+  }, [seed?.token]);
+  useEffect(() => {
+    if (sourceImage || rawSourceVideo || boardRefs.images.length || boardRefs.videos.length || sticky.text) {
+      setSeedRefs(null);
+    }
+  }, [sourceImage, rawSourceVideo, boardRefs.images.length, boardRefs.videos.length, sticky.text]);
 
   useEffect(() => {
     let mounted = true;
@@ -65,14 +97,53 @@ export function GenericModelScreen({ model }: { model: FalModel }) {
   const fields = schema.status === 'loading' ? [] : schema.fields;
   const promptField = useMemo(() => fields.find((f) => f.name === 'prompt'), [fields]);
   const referenceField = useMemo(() => pickReferenceField(fields), [fields]);
+  const videoReferenceField = useMemo(() => pickVideoReferenceField(fields), [fields]);
   const multiImage = Boolean(referenceField?.multiple);
+  const multiVideo = Boolean(videoReferenceField?.multiple);
 
-  // Which board images feed the primary image field.
+  // Which board images feed the primary image field — live selection, falling
+  // back to a reopened recipe's connected ids.
   const refImageIds = multiImage
-    ? boardRefs.images.map((i) => i.id)
+    ? boardRefs.images.length
+      ? boardRefs.images.map((i) => i.id)
+      : seedRefs?.images.map((i) => i.id) ?? []
     : sourceImage
       ? [sourceImage.id]
-      : [];
+      : seedRefs?.images[0]
+        ? [seedRefs.images[0].id]
+        : [];
+
+  // A selected embed only counts as a video candidate when it's a Fal video.
+  const sourceVideo = useMemo(
+    () => (rawSourceVideo?.url && unwrapVideoEmbedUrl(rawSourceVideo.url) ? rawSourceVideo : null),
+    [rawSourceVideo],
+  );
+  // Which board videos feed the primary video field — same live-first fallback.
+  const refVideoIds = multiVideo
+    ? boardRefs.videos.length
+      ? boardRefs.videos.map((v) => v.id)
+      : seedRefs?.videos.map((v) => v.id) ?? []
+    : sourceVideo
+      ? [sourceVideo.id]
+      : seedRefs?.videos[0]
+        ? [seedRefs.videos[0].id]
+        : [];
+
+  // The frame the current references came from, if any — live selection wins,
+  // else falls back to the reopened card's own frame. Lets the output place
+  // below that frame, sized to match, instead of trailing one reference item.
+  const usingLiveRefs = Boolean(sourceImage || sourceVideo || boardRefs.images.length || boardRefs.videos.length);
+  const referenceFrameId = usingLiveRefs ? boardRefs.frameId : seed?.frameId ?? undefined;
+
+  // Merge a fresh seed's static input over the schema defaults once they're
+  // loaded, then apply any connected-sticky field overrides (e.g. a "Seed:
+  // 42" or "Prompt: …" sticky) — those win over the frozen input snapshot.
+  useEffect(() => {
+    if (!seed || schema.status === 'loading') return;
+    const overrides = resolveStickyFieldOverrides(seed.stickies, fields);
+    setValues((v) => ({ ...v, ...seed.input, ...overrides }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed?.token, schema.status]);
 
   // Seed the prompt from selected stickies until the user edits it.
   useEffect(() => {
@@ -98,6 +169,10 @@ export function GenericModelScreen({ model }: { model: FalModel }) {
       setNote(`Select ${multiImage ? 'one or more images' : 'an image'} on the board for this model.`);
       return;
     }
+    if (videoReferenceField?.required && refVideoIds.length === 0 && !input[videoReferenceField.name]) {
+      setNote(`Select ${multiVideo ? 'one or more Fal videos' : 'a Fal video'} on the board for this model.`);
+      return;
+    }
     if (promptField?.required && !String(input.prompt ?? '').trim()) {
       setNote('Type a prompt or select a sticky note first.');
       return;
@@ -114,9 +189,67 @@ export function GenericModelScreen({ model }: { model: FalModel }) {
         ...(referenceField && refImageIds.length
           ? { imageFields: [{ field: referenceField.name, itemIds: refImageIds, multiple: multiImage }] }
           : {}),
+        ...(videoReferenceField && refVideoIds.length
+          ? { videoFields: [{ field: videoReferenceField.name, itemIds: refVideoIds, multiple: multiVideo }] }
+          : {}),
+        ...(seed ? { cardAnchorId: seed.cardId } : {}),
+        ...(referenceFrameId ? { referenceFrameId } : {}),
       },
     });
     setNote('Started — watch the board (and the tray above). Result drops in when ready.');
+  };
+
+  // Snapshot the model + current inputs as a board Card ("settings card"),
+  // connected to whatever fed this screen (images/video/prompt sticky).
+  const onSaveCard = async () => {
+    setNote(null);
+    let input: Record<string, unknown>;
+    try {
+      input = buildInput(fields, values);
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : 'Invalid input.');
+      return;
+    }
+
+    const recipe: RecipeCard = {
+      v: RECIPE_CARD_VERSION,
+      endpointId: model.endpointId,
+      capability: model.capability,
+      input,
+      referenceField: referenceField ?? null,
+      videoReferenceField: videoReferenceField ?? null,
+    };
+
+    const connectIds = [...refImageIds, ...refVideoIds];
+    if (sticky.anchorId) connectIds.push(sticky.anchorId);
+
+    // A selected frame's contents count as connected too.
+    try {
+      const sel = (await miro.board.getSelection()) as Array<{ id: string; type: string }>;
+      const frameIds = sel.filter((s) => s.type === 'frame').map((s) => s.id);
+      if (frameIds.length) {
+        const expanded = await resolveBoardItems(frameIds);
+        connectIds.push(
+          ...expanded.images.map((i) => i.id),
+          ...expanded.videos.map((v) => v.id),
+          ...expanded.stickies.map((s) => s.id),
+        );
+      }
+    } catch (e) {
+      console.warn('[GenericModelScreen] frame expansion for save failed', e);
+    }
+
+    try {
+      const { id: cardId } = await createCardBelow({
+        sourceItemId: connectIds[0],
+        title: `Settings · ${model.label}`,
+        description: serializeRecipeCard(recipe),
+      });
+      if (connectIds.length) await connectItemsToCard(connectIds, cardId);
+      setNote('Saved as a settings card on the board.');
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : 'Failed to save settings card.');
+    }
   };
 
   return (
@@ -151,12 +284,31 @@ export function GenericModelScreen({ model }: { model: FalModel }) {
             </div>
           )}
 
+          {videoReferenceField && (
+            <div className={`source-image ${refVideoIds.length ? 'chosen' : ''}`}>
+              {refVideoIds.length ? (
+                <>
+                  <span className="check">✓</span> {refVideoIds.length} video{refVideoIds.length === 1 ? '' : 's'} →{' '}
+                  <code>{videoReferenceField.name}</code>
+                </>
+              ) : (
+                <>
+                  Select {multiVideo ? 'one or more Fal videos' : 'a Fal video'} on the board →{' '}
+                  <code>{videoReferenceField.name}</code>
+                </>
+              )}
+            </div>
+          )}
+
           <SchemaForm
             fields={fields}
             commonOrder={COMMON_ARGS[model.capability] ?? COMMON_ARGS.image}
             values={values}
             onChange={onChange}
-            hide={referenceField ? [referenceField.name] : []}
+            hide={[
+              ...(referenceField ? [referenceField.name] : []),
+              ...(videoReferenceField ? [videoReferenceField.name] : []),
+            ]}
           />
 
           {promptField && editedPrompt && (
@@ -172,9 +324,14 @@ export function GenericModelScreen({ model }: { model: FalModel }) {
             </button>
           )}
 
-          <button type="button" className="primary" onClick={onGenerate}>
-            Run model
-          </button>
+          <div className="button-row">
+            <button type="button" className="secondary" onClick={onSaveCard}>
+              Save as settings card
+            </button>
+            <button type="button" className="primary" onClick={onGenerate}>
+              Run model
+            </button>
+          </div>
         </>
       )}
 

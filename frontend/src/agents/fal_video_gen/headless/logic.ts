@@ -2,15 +2,21 @@ import { api, videoEmbedUrl, type StatusResponse } from '../../../lib/api';
 import {
   asPreviewUrl,
   createEmbedAtPosition,
+  createImageAtAbsolute,
   createImageBelow,
   deleteItem,
+  getAudioRef,
   getImageAspectRatio,
   getImageRef,
   getStickyText,
+  getVideoRef,
   makePlaceholderDataUrl,
   parseRatio,
   replaceImageContent,
   resolveAbsolutePosition,
+  resolveBelowFrameBox,
+  resolvePlaceholderAnchor,
+  snapFrameRatio,
 } from '../../../shared/boardHelpers';
 import {
   addActiveJob,
@@ -20,7 +26,7 @@ import {
 } from '../../../shared/storage';
 import { estimateCostUSD, reportedInferenceSeconds } from '../../../shared/cost';
 import { bindSeedanceReferences, type Ref } from '../../../shared/referenceBinding';
-import { unwrapVideoEmbedUrl } from '../../../lib/api';
+import { parseFalInputSchema, pickAspectRatioField } from '../../../shared/schema';
 import { broadcastUpdate } from '../../../headless/communications';
 
 export type VideoGenPayload = {
@@ -32,6 +38,11 @@ export type VideoGenPayload = {
   input: Record<string, unknown>;
   placeholderRatio?: string;
   referenceField?: { name: string; multiple: boolean; required: boolean };
+  /** The board video embed used as the source clip (video-to-video / edit models). */
+  sourceVideoId?: string;
+  /** Board video embeds for a `video_urls`-style array field. */
+  sourceVideoIds?: string[];
+  videoReferenceField?: { name: string; multiple: boolean; required: boolean };
   /**
    * First-last-frame models: the two board images to use, and the schema field
    * names they map to (e.g. first_frame_url / last_frame_url).
@@ -39,12 +50,22 @@ export type VideoGenPayload = {
   frames?: { firstImageId?: string; lastImageId?: string; firstField: string; lastField: string };
   /**
    * Reference-to-video: board items woven into one shot.
-   * - Seedance (default): images → image_urls, video embeds → video_urls, and
-   *   the prompt is adapted to @Image1 / @Video1 tokens from the board titles.
+   * - Seedance (default): images → image_urls, video embeds → video_urls,
+   *   audio embeds → audio_urls (only for models whose schema declares an
+   *   audio field), and the prompt is adapted to @Image1 / @Video1 / @Audio1
+   *   tokens from the board titles.
    * - Veo (`blend: true`): images only, passed as-is into image_urls and blended
-   *   ("ingredients"); no @token rewrite, no video refs.
+   *   ("ingredients"); no @token rewrite, no video/audio refs.
    */
-  references?: { imageIds?: string[]; videoIds?: string[]; blend?: boolean };
+  references?: { imageIds?: string[]; videoIds?: string[]; audioIds?: string[]; blend?: boolean };
+  /** The settings card this run was started from, if reopened from one — the
+   *  output places beside it instead of below the usual source anchor. */
+  cardAnchorId?: string;
+  /** The frame the references were collected from, if any — takes placement
+   *  priority over `cardAnchorId`: the output goes directly below this frame,
+   *  sized to match its width (ratio snapped to the frame's own shape when
+   *  it's close to a logical one, see `snapFrameRatio`). */
+  referenceFrameId?: string;
 };
 
 export type VideoGenResult = {
@@ -63,6 +84,11 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
     referenceField,
     frames,
     references,
+    sourceVideoId,
+    sourceVideoIds,
+    videoReferenceField,
+    cardAnchorId,
+    referenceFrameId,
   } = (payload ?? {}) as VideoGenPayload;
 
   if (!endpointId) throw new Error('endpointId is required');
@@ -102,24 +128,33 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
       finalInput.image_urls = images.map((r) => r.url);
       console.log(`[fal_video_gen] blend references → ${images.length} image(s)`);
     } else {
-      // Seedance: images + video embeds, prompt adapted to @Image/@Video tokens.
+      // Seedance: images + video/audio embeds, prompt adapted to @Image/@Video/@Audio tokens.
       const videos: Ref[] = [];
       for (const id of references.videoIds ?? []) {
-        const v = await getEmbedVideoRef(id);
+        const v = await getVideoRef(id);
         if (v) {
           videos.push(v);
           parents.add(id);
         }
       }
-      if (images.length === 0 && videos.length === 0) {
-        throw new Error('Select at least one reference image or video on the board.');
+      const audios: Ref[] = [];
+      for (const id of references.audioIds ?? []) {
+        const a = await getAudioRef(id);
+        if (a) {
+          audios.push(a);
+          parents.add(id);
+        }
       }
-      const bound = bindSeedanceReferences({ prompt: finalInput.prompt, images, videos });
+      if (images.length === 0 && videos.length === 0 && audios.length === 0) {
+        throw new Error('Select at least one reference image, video, or audio clip on the board.');
+      }
+      const bound = bindSeedanceReferences({ prompt: finalInput.prompt, images, videos, audios });
       if (bound.image_urls.length) finalInput.image_urls = bound.image_urls;
       if (bound.video_urls.length) finalInput.video_urls = bound.video_urls;
+      if (bound.audio_urls.length) finalInput.audio_urls = bound.audio_urls;
       finalInput.prompt = bound.prompt;
       console.log(
-        `[fal_video_gen] references → ${images.length} image(s), ${videos.length} video(s)`,
+        `[fal_video_gen] references → ${images.length} image(s), ${videos.length} video(s), ${audios.length} audio clip(s)`,
       );
     }
     // First image doubles as the placeholder/embed preview thumbnail.
@@ -157,6 +192,29 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
     if (referenceField?.required && isEmpty(finalInput[referenceField.name])) {
       throw new Error('Select an image on the board to use as the source frame.');
     }
+
+    // Single/multi source video → the model's video field (video-to-video / edit).
+    if (videoReferenceField) {
+      broadcastUpdate({ requestId, status: 'queued', message: 'Reading source video…' });
+      if (videoReferenceField.multiple) {
+        const urls: string[] = [];
+        for (const id of sourceVideoIds ?? []) {
+          const v = await getVideoRef(id);
+          if (v) {
+            urls.push(v.url);
+            parents.add(id);
+          }
+        }
+        if (urls.length) finalInput[videoReferenceField.name] = urls;
+      } else if (sourceVideoId && isEmpty(finalInput[videoReferenceField.name])) {
+        const v = await getVideoRef(sourceVideoId);
+        if (v) finalInput[videoReferenceField.name] = v.url;
+        parents.add(sourceVideoId);
+      }
+      if (videoReferenceField.required && isEmpty(finalInput[videoReferenceField.name])) {
+        throw new Error('Select a Fal video on the board to use as the source clip.');
+      }
+    }
   }
 
   // Match the placeholder to the anchor frame's aspect ratio when unset.
@@ -165,6 +223,7 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
     references?.videoIds?.[0] ??
     frames?.firstImageId ??
     sourceImageId ??
+    sourceVideoId ??
     stickyId;
   let ratio = placeholderRatio;
   if (!ratio && anchorId) {
@@ -172,14 +231,60 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
   }
   if (!ratio) ratio = '16:9';
 
-  // Placeholder below the anchor frame.
+  // If the references came from a frame, that frame takes placement priority:
+  // the output goes directly below it, sized to match its width, ratio
+  // snapped to the frame's own shape when that's close to a logical one.
+  let placementBox: { x: number; y: number; width: number; height: number } | null = null;
+  if (referenceFrameId) {
+    const frame = await resolveAbsolutePosition(referenceFrameId);
+    if (frame?.width && frame?.height) {
+      const snapped = snapFrameRatio(frame.width, frame.height);
+      if (snapped) {
+        ratio = snapped;
+        // Also feed the frame's shape into the actual generation request —
+        // otherwise Fal generates at whatever ratio the form had, and the
+        // mismatched result gets cropped to fit the frame-sized placeholder.
+        try {
+          const schemaRes = await api.getSchema(endpointId);
+          const aspectField = pickAspectRatioField(parseFalInputSchema(schemaRes.openapi));
+          const value = aspectField?.valueForRatio(snapped);
+          if (aspectField && value) finalInput[aspectField.name] = value;
+        } catch (e) {
+          console.warn('[fal_video_gen] aspect-ratio override failed', e);
+        }
+      }
+      placementBox = await resolveBelowFrameBox(referenceFrameId, ratio);
+    }
+  }
+
+  // Placeholder below the reference frame (if any), else below the anchor
+  // item (or beside the settings card, if this run was started from one).
   broadcastUpdate({ requestId, status: 'queued', message: 'Placing placeholder…' });
-  const { id: placeholderId, x: targetX, y: targetY } = await createImageBelow({
-    sourceItemId: anchorId,
-    url: makePlaceholderDataUrl(ratio, 'Generating video…'),
-    ratio,
-    title: 'Fal · Generating video',
-  });
+  let placeholderId: string, targetX: number, targetY: number;
+  if (placementBox) {
+    const placed = await createImageAtAbsolute({
+      url: makePlaceholderDataUrl(ratio, 'Generating video…'),
+      x: placementBox.x,
+      y: placementBox.y,
+      width: placementBox.width,
+      title: 'Fal · Generating video',
+    });
+    placeholderId = placed.id;
+    targetX = placed.x;
+    targetY = placed.y;
+  } else {
+    const { anchorId: placementAnchor, side } = await resolvePlaceholderAnchor(cardAnchorId, anchorId);
+    const placed = await createImageBelow({
+      sourceItemId: placementAnchor,
+      url: makePlaceholderDataUrl(ratio, 'Generating video…'),
+      ratio,
+      title: 'Fal · Generating video',
+      side,
+    });
+    placeholderId = placed.id;
+    targetX = placed.x;
+    targetY = placed.y;
+  }
 
   // Submit.
   broadcastUpdate({ requestId, status: 'running', message: 'Submitting to Fal…' });
@@ -257,8 +362,11 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
 
   const outputUrl = final.output?.[0];
   if (final.status === 'SUCCEEDED' && outputUrl) {
-    // Swap the placeholder image for an inline embed of the video player.
-    const { width, height } = parseRatio(ratio, 720);
+    // Swap the placeholder image for an inline embed of the video player —
+    // same box the placeholder was actually placed at, so a frame-anchored
+    // generation keeps its frame-matched size instead of reverting to the
+    // ratio's default (720px-capped) dimensions.
+    const { width, height } = placementBox ?? parseRatio(ratio, 720);
     const abs = await resolveAbsolutePosition(placeholderId);
     const embedX = abs?.absoluteX ?? targetX;
     const embedY = abs?.absoluteY ?? targetY;
@@ -295,22 +403,6 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
 
 function isEmpty(v: unknown): boolean {
   return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
-}
-
-/** Resolve a board video embed to its underlying Fal video URL + board title. */
-async function getEmbedVideoRef(itemId: string): Promise<Ref | null> {
-  try {
-    const item = (await miro.board.getById(itemId)) as
-      | { type?: string; url?: string; title?: string }
-      | null;
-    if (!item || item.type !== 'embed' || !item.url) return null;
-    const url = unwrapVideoEmbedUrl(item.url);
-    if (!url) return null;
-    return { url, title: (item.title ?? '').trim() || undefined };
-  } catch (e) {
-    console.warn('[fal_video_gen] getEmbedVideoRef failed', itemId, e);
-    return null;
-  }
 }
 
 /** A poll timeout (job may still be running) vs. a real failure. */
