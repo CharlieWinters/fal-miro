@@ -174,6 +174,18 @@ export function SettingsScreen({ forceBackendSetup, onBackendConfigured }: Setti
               }}
             />
           </label>
+          <span className="key-info-hint">
+            Don't have a backend yet? See the{' '}
+            <a
+              className="doc-link"
+              href="https://github.com/CharlieWinters/fal-miro#deploy-your-own-backend"
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              deploy guide on GitHub
+            </a>
+            .
+          </span>
           <div style={{ display: 'flex', gap: 12 }}>
             <button type="button" className="primary" onClick={saveConnection}>
               Save backend
