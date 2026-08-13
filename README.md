@@ -82,7 +82,9 @@ npm install
 wrangler login                       # one-time
 wrangler secret put FAL_KEY          # paste your key
 wrangler secret put ADMIN_KEY        # optional — powers the credits badge + raises /models rate limits
-wrangler secret put BACKEND_KEY      # any random string — required
+openssl rand -hex 32                 # generate a BACKEND_KEY — copy the output, you'll also paste it
+                                      # into the panel's Settings screen later (see below)
+wrangler secret put BACKEND_KEY      # paste the value you just generated
 npm run deploy:worker
 ```
 
