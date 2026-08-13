@@ -103,6 +103,7 @@ body {
 }
 
 .credits {
+  margin-left: auto;
   font: 600 12px 'Roobert PRO', system-ui, sans-serif;
   color: var(--ok);
   background: rgba(110, 219, 140, 0.12);
