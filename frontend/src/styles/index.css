@@ -253,6 +253,31 @@ body {
   color: var(--muted-2);
 }
 
+.catalog-loading {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 14px;
+  color: var(--muted);
+  font: 500 12.5px 'Roobert PRO', system-ui, sans-serif;
+}
+.catalog-loading .spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  animation: spin 800ms linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .screen {
   padding: 14px;
   display: flex;

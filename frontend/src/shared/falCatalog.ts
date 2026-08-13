@@ -209,6 +209,21 @@ export function setActiveModels(models: FalModel[]): void {
   catalogListeners.forEach((l) => l());
 }
 
+// Whether the browsable catalog is settled — either a cached sync was applied
+// at init, or the first real sync attempt (success or failure) has completed.
+// Drives App.tsx's loading screen: showing the ~40-entry hand list on its own
+// before the long tail arrives just reads as a broken/incomplete list, so a
+// first-ever-load user sees a loading state instead until this flips true.
+let catalogReady = false;
+export function isCatalogReady(): boolean {
+  return catalogReady;
+}
+/** Mark the catalog settled (call once the sync promise resolves OR rejects). */
+export function markCatalogReady(): void {
+  catalogReady = true;
+  catalogListeners.forEach((l) => l());
+}
+
 export function setActiveCatalogFilter(filter: CatalogFilter): void {
   activeFilter = filter;
   catalogListeners.forEach((l) => l());
@@ -615,10 +630,14 @@ export function mergeSyncedCatalog(meta: SyncedMeta[]): FalModel[] {
 // (and FAL_CATEGORY_MAP/mapFalCategory, which it depends on) are actually
 // defined — see the `activeModels` comment near the top of this file for why
 // this can't happen any earlier. No-op (stays on the hand list) on the
-// first-ever load, when there's nothing cached yet.
+// first-ever load, when there's nothing cached yet — App.tsx's loading screen
+// covers that gap instead.
 {
   const cachedSyncedModels = readCachedSyncedModels();
-  if (cachedSyncedModels) setActiveModels(mergeSyncedCatalog(cachedSyncedModels));
+  if (cachedSyncedModels) {
+    setActiveModels(mergeSyncedCatalog(cachedSyncedModels));
+    catalogReady = true;
+  }
 }
 
 // Short labels used for capability chips/icons (also the task fallback).

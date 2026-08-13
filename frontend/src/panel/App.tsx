@@ -18,6 +18,7 @@ import {
   familyByKey,
   findModel,
   isReferenceToVideo,
+  markCatalogReady,
   mergeSyncedCatalog,
   setActiveCatalogFilter,
   setActiveModels,
@@ -25,6 +26,7 @@ import {
   type FalModel,
   type ModelFamily,
 } from '../shared/falCatalog';
+import { useCatalogReady } from './hooks/useCatalog';
 import { getCatalogFilter, getFavourites } from '../shared/storage';
 import { getConnectedResources, getParentFrameId } from '../shared/boardHelpers';
 import { buildRecipeSeed, type RecipeCard, type RecipeSeed } from '../shared/recipeCard';
@@ -117,6 +119,21 @@ function FamilyScreen({ family, seed }: { family: ModelFamily; seed?: RecipeSeed
   );
 }
 
+/**
+ * Shown between "backend configured" and "catalog settled" — covers the gap
+ * where only the ~40-entry hand list would otherwise be visible before the
+ * synced long tail arrives, which read as a broken/incomplete list rather
+ * than a catalog still loading.
+ */
+function CatalogLoadingScreen() {
+  return (
+    <div className="catalog-loading">
+      <span className="spinner" aria-hidden="true" />
+      <span>Loading models…</span>
+    </div>
+  );
+}
+
 function App() {
   const [family, setFamily] = useState<ModelFamily | null>(null);
   const [model, setModel] = useState<FalModel | null>(null);
@@ -128,6 +145,7 @@ function App() {
   // instead of silently spending whoever's Fal credits happened to be baked
   // into a shared build.
   const [backendReady, setBackendReady] = useState<boolean>(() => loadBackendConfig());
+  const catalogReady = useCatalogReady();
 
   // Load the persisted curation filter, then sync the full model catalog from
   // fal metadata (merged over the hand list). Both push into the live catalog.
@@ -143,7 +161,11 @@ function App() {
         // Cache for next load — see falCatalog.ts's readCachedSyncedModels.
         cacheSyncedModels(res.models);
       })
-      .catch((e) => console.warn('[App] catalog sync failed — using built-in list', e));
+      .catch((e) => console.warn('[App] catalog sync failed — using built-in list', e))
+      // Either way, the catalog has settled — stop showing the loading screen.
+      // A failed sync still leaves a usable (hand-only) list, which beats a
+      // loading state stuck forever.
+      .finally(markCatalogReady);
     getFavourites()
       .then(applyFavourites)
       .catch((e) => console.warn('[App] loading favourites failed', e));
@@ -222,6 +244,8 @@ function App() {
 
         {showSettings ? (
           <SettingsScreen onBackendConfigured={() => setBackendReady(true)} />
+        ) : !catalogReady ? (
+          <CatalogLoadingScreen />
         ) : model ? (
           <ModelScreen model={model} seed={recipeSeed} />
         ) : family ? (
