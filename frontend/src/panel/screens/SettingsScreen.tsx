@@ -34,10 +34,10 @@ export function SettingsScreen({ forceBackendSetup, onBackendConfigured }: Setti
   const [note, setNote] = useState<string | null>(null);
 
   const savedConnection = getConnectionConfig();
-  // Backend mode is the recommended default for a fresh install — full
-  // feature set, and a browser-held key is the tradeoff-laden option, not
-  // the path of least resistance.
-  const [mode, setMode] = useState<'backend' | 'client'>(savedConnection?.mode ?? 'backend');
+  // Client mode is the path-of-least-resistance default for a fresh install —
+  // nothing to deploy. Backend mode unlocks the full feature set but requires
+  // the user to actually go run one first.
+  const [mode, setMode] = useState<'backend' | 'client'>(savedConnection?.mode ?? 'client');
   const [backendUrlInput, setBackendUrlInput] = useState(
     () => (savedConnection?.mode === 'backend' ? savedConnection.url : '') ?? '',
   );
