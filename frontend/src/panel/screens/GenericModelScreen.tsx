@@ -14,11 +14,13 @@ import { COMMON_ARGS, type FalModel } from '../../shared/falCatalog';
 import {
   parseFalInputSchema,
   defaultsFor,
+  pickPromptField,
   pickReferenceField,
   pickVideoReferenceField,
   type Field,
 } from '../../shared/schema';
-import { useBoardReferences, useFirstSelected, useSelectedStickyText } from '../hooks/boardInputs';
+import { useBoardReferences, useFirstSelected, usePromptSource, useSelectionSnapshot } from '../hooks/boardInputs';
+import { DrivenPromptField, PromptSourceControl, PromptWaitingHint } from '../PromptSourceControl';
 import { ModelMetaChips } from '../ModelMetaChips';
 
 type ImageItem = { id: string; title?: string };
@@ -41,13 +43,16 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
   const [schema, setSchema] = useState<SchemaState>({ status: 'loading' });
   const [meta, setMeta] = useState<Record<string, unknown> | null>(null);
   const [values, setValues] = useState<Record<string, unknown>>({});
-  const [editedPrompt, setEditedPrompt] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
   const sourceImage = useFirstSelected<ImageItem>('image');
   const rawSourceVideo = useFirstSelected<EmbedItem>('embed');
   const boardRefs = useBoardReferences();
-  const sticky = useSelectedStickyText();
+  // Prompt autofill is opt-in now — 'off' by default, and only the live modes
+  // write into the prompt field. See hooks/boardInputs.ts's usePromptSource.
+  const sticky = usePromptSource(sourceImage?.id ?? rawSourceVideo?.id);
+  const snapshotSelection = useSelectionSnapshot();
+  const [pulled, setPulled] = useState<number | null>(null);
 
   // A reopened settings card's connected ids — fallback source until the user
   // selects something directly on the board themselves.
@@ -68,7 +73,7 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
   useEffect(() => {
     let mounted = true;
     setSchema({ status: 'loading' });
-    setEditedPrompt(false);
+    setPulled(null);
     api
       .getSchema(model.endpointId)
       .then((res) => {
@@ -95,7 +100,7 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
   }, [model.endpointId]);
 
   const fields = schema.status === 'loading' ? [] : schema.fields;
-  const promptField = useMemo(() => fields.find((f) => f.name === 'prompt'), [fields]);
+  const promptField = useMemo(() => pickPromptField(fields), [fields]);
   const referenceField = useMemo(() => pickReferenceField(fields), [fields]);
   const videoReferenceField = useMemo(() => pickVideoReferenceField(fields), [fields]);
   const multiImage = Boolean(referenceField?.multiple);
@@ -145,14 +150,40 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.token, schema.status]);
 
-  // Seed the prompt from selected stickies until the user edits it.
+  // Mirror the board-driven text into whichever field is this model's primary
+  // text field — most models call it `prompt`, a few (mostly TTS) call it
+  // `text`. Only runs in a live mode; 'off' never writes here, which is the
+  // whole point of the control.
   useEffect(() => {
-    if (editedPrompt || !promptField) return;
-    if (sticky.text) setValues((v) => ({ ...v, prompt: sticky.text }));
-  }, [sticky.text, editedPrompt, promptField]);
+    // `!sticky.text` matters: an empty live mode must not blank the box. The
+    // field stays editable while a mode is armed-but-waiting, so clearing it
+    // here would delete what the user just typed.
+    if (sticky.mode === 'off' || !promptField || !sticky.text) return;
+    const fieldName = promptField.name;
+    setValues((v) => ({ ...v, [fieldName]: sticky.text }));
+  }, [sticky.mode, sticky.text, promptField]);
+
+  /** Copy the current selection in once, then leave the box alone. */
+  const pullOnce = () => {
+    if (!promptField) return;
+    const { text, count } = snapshotSelection();
+    if (!count) return;
+    sticky.setMode('off');
+    setValues((v) => ({ ...v, [promptField.name]: text }));
+    setPulled(count);
+  };
+
+  /** Keep the text, hand the box back to the user. */
+  const unlink = () => {
+    if (promptField) setValues((v) => ({ ...v, [promptField.name]: sticky.text }));
+    sticky.setMode('off');
+    setPulled(null);
+  };
 
   const onChange = (name: string, value: unknown) => {
-    if (name === 'prompt') setEditedPrompt(true);
+    if (name === promptField?.name) {
+        setPulled(null);
+    }
     setValues((v) => ({ ...v, [name]: value }));
   };
 
@@ -173,8 +204,12 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
       setNote(`Select ${multiVideo ? 'one or more Fal videos' : 'a Fal video'} on the board for this model.`);
       return;
     }
-    if (promptField?.required && !String(input.prompt ?? '').trim()) {
-      setNote('Type a prompt or select a sticky note first.');
+    if (promptField?.required && !String(input[promptField.name] ?? '').trim()) {
+      setNote(
+        sticky.mode === 'off'
+          ? 'Type a prompt, or switch Prompt source to Selection to use your sticky notes.'
+          : 'Type a prompt or select a sticky note first.',
+      );
       return;
     }
 
@@ -300,6 +335,37 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
             </div>
           )}
 
+          {promptField && (
+            <PromptSourceControl
+              mode={sticky.mode}
+              onModeChange={(m) => {
+                sticky.setMode(m);
+                setPulled(null);
+              }}
+              onPullOnce={pullOnce}
+              canPull={snapshotSelection().count > 0}
+            />
+          )}
+
+          {promptField && sticky.mode !== 'off' && sticky.isEmpty && (
+            <PromptWaitingHint mode={sticky.mode} />
+          )}
+
+          {promptField && sticky.mode !== 'off' && !sticky.isEmpty && (
+            <DrivenPromptField
+              mode={sticky.mode}
+              text={sticky.text}
+              notes={sticky.notes}
+              onUnlink={unlink}
+            />
+          )}
+
+          {pulled !== null && (
+            <span className="ps-pulled">
+              Pulled {pulled} sticky note{pulled === 1 ? '' : 's'} in. Source stays Off — nothing will overwrite this.
+            </span>
+          )}
+
           <SchemaForm
             fields={fields}
             commonOrder={COMMON_ARGS[model.capability] ?? COMMON_ARGS.image}
@@ -308,21 +374,10 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
             hide={[
               ...(referenceField ? [referenceField.name] : []),
               ...(videoReferenceField ? [videoReferenceField.name] : []),
+              // A live mode renders the prompt itself, framed and read-only.
+              ...(promptField && sticky.mode !== 'off' && !sticky.isEmpty ? [promptField.name] : []),
             ]}
           />
-
-          {promptField && editedPrompt && (
-            <button
-              type="button"
-              className="reset-link"
-              onClick={() => {
-                setEditedPrompt(false);
-                setNote(null);
-              }}
-            >
-              ↻ Reset prompt to sticky
-            </button>
-          )}
 
           <div className="button-row">
             <button type="button" className="secondary" onClick={onSaveCard}>

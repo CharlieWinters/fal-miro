@@ -3,14 +3,15 @@
 // exposes:
 //   • single image  → useFirstSelected('image')      ("use the selected image")
 //   • image/video array → useBoardReferences()        (bulk, frame-aware)
-//   • prompt/text    → useSelectedStickyText()         (stickies → prompt)
+//   • prompt/text    → usePromptSource()                (stickies → prompt)
 //
 // Consolidated here so any model screen — hand-built or the future generic form
 // — gets the same easy selection behaviour instead of reinventing it.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { unwrapVideoEmbedUrl, unwrapAudioEmbedUrl } from '../../lib/api';
-import { cachedBoardGet, getDocumentText, stripHtml } from '../../shared/boardHelpers';
+import { cachedBoardGet, getConnectedStickyNotes, stripHtml } from '../../shared/boardHelpers';
+import { loadPromptSource, savePromptSource, type PromptSource } from '../../shared/storage';
 
 export { useFirstSelected, useSelectedItems } from './useSelection';
 
@@ -123,62 +124,25 @@ export type SelectedSticky = { id: string; content?: string; x?: number };
  * inside a "prompt frame" is picked up the moment the frame (or its card) is
  * selected, not just when the sticky itself is.
  *
- * Doc-format items in the same selection/frame are folded into the same list
- * — a Doc plays the same "supplies prompt text" role as a sticky, just with
- * its text fetched from the backend (see `getDocumentText`) instead of read
- * straight off the Web SDK item. The SDK has no accessor for Docs at all
- * (confirmed live: it reports one as a bare geometry shell tagged
- * `type: 'unsupported'`, indistinguishable from any other item type the SDK
- * doesn't have a class for) — so every `unsupported` item is a *candidate*
- * here, and `getDocumentText`'s REST call (which sees the real `doc_format`
- * type) decides for real; a non-Doc `unsupported` item just contributes
- * nothing. Silently contributes nothing either way if the current Miro
- * account isn't connected (Settings → "Connect Miro account") — a doc nobody
- * can read yet behaves like an empty sticky, not an error.
+ * Sticky notes only. Doc-format items used to be folded in here too, read via
+ * a backend Miro OAuth token — the Web SDK exposes no accessor for them at
+ * all. That whole path was dropped to keep the app deployable with nothing
+ * but a Fal key; paste the text into a sticky instead.
  */
 export async function collectSelectedStickies(): Promise<SelectedSticky[]> {
   const sel = (await miro.board.getSelection()) as Array<SelectedSticky & { type: string }>;
   const stickies = new Map<string, SelectedSticky>();
   const frameIds: string[] = [];
-  const docCandidates = new Map<string, SelectedSticky>();
 
   for (const it of sel) {
     if (it.type === 'sticky_note') stickies.set(it.id, it);
-    else if (it.type === 'unsupported') docCandidates.set(it.id, it);
     else if (it.type === 'frame') frameIds.push(it.id);
   }
 
   if (frameIds.length) {
-    // Sticky notes are a real, filterable type — query by type directly. Doc
-    // candidates are the SDK's generic 'unsupported' label, not a genuine
-    // widget type, so filtering server-side by it is unverified/risky (see
-    // cachedBoardGet) — fetch every item instead and filter client-side,
-    // same as the direct-selection path above already does via
-    // getSelection()'s unfiltered result.
-    const [stickyItems, allItems] = await Promise.all([
-      cachedBoardGet('sticky_note') as Promise<Array<SelectedSticky & { parentId?: string }>>,
-      cachedBoardGet() as Promise<Array<SelectedSticky & { type: string; parentId?: string }>>,
-    ]);
+    const stickyItems = (await cachedBoardGet('sticky_note')) as Array<SelectedSticky & { parentId?: string }>;
     for (const it of stickyItems) {
       if (it.parentId && frameIds.includes(it.parentId)) stickies.set(it.id, it);
-    }
-    for (const it of allItems) {
-      if (it.type === 'unsupported' && it.parentId && frameIds.includes(it.parentId)) docCandidates.set(it.id, it);
-    }
-  }
-
-  if (docCandidates.size) {
-    let userId: string | undefined;
-    try {
-      userId = (await miro.board.getUserInfo()).id;
-    } catch {
-      /* Web SDK unavailable — skip doc resolution below */
-    }
-    if (userId) {
-      for (const [id, doc] of docCandidates) {
-        const content = await getDocumentText(id, userId);
-        if (content) stickies.set(id, { ...doc, content });
-      }
     }
   }
 
@@ -187,8 +151,7 @@ export async function collectSelectedStickies(): Promise<SelectedSticky[]> {
 
 /** Live sticky-note selection, frame-expanded (see `collectSelectedStickies`),
  *  refreshed on selection change. The raw list, ordered/joined by callers as
- *  needed — `useSelectedStickyText` below is the common "just give me the
- *  prompt text" wrapper over this. */
+ *  needed — `usePromptSource` below is what turns it into prompt text. */
 export function useBoardStickies(): SelectedSticky[] {
   const [stickies, setStickies] = useState<SelectedSticky[]>([]);
 
@@ -215,12 +178,98 @@ export function useBoardStickies(): SelectedSticky[] {
   return stickies;
 }
 
-/** Live prompt seed from the current sticky selection: text + the anchor sticky. */
-export function useSelectedStickyText(): { text: string; anchorId?: string } {
-  const stickies = useBoardStickies();
+// ---------------------------------------------------------------------------
+// Prompt source — the explicit replacement for the old always-on autofill.
+//
+// It used to be a hidden waterfall: selected stickies won, else stickies
+// connected to the source image, else nothing — and whatever it found
+// silently overwrote whatever you had typed. Those two sources are now modes
+// the user picks, and 'off' (the default) means the box is theirs.
+// ---------------------------------------------------------------------------
+
+/** One sticky feeding the prompt, in the order it contributes. */
+export type PromptNote = { id: string; label: string };
+
+export type PromptSourceState = {
+  mode: PromptSource;
+  setMode: (m: PromptSource) => void;
+  /** Text the board is currently supplying — '' when off, or when a live mode finds nothing. */
+  text: string;
+  /** The stickies behind `text`, for the chips under the field. */
+  notes: PromptNote[];
+  /** A live mode is on but the board has nothing to give it. */
+  isEmpty: boolean;
+  /** First contributing sticky — what a generated result gets anchored to. */
+  anchorId?: string;
+};
+
+/**
+ * Resolve the prompt text for the active source mode.
+ *
+ * `sourceItemId` is the image/video the screen is working from; 'connected'
+ * reads the stickies wired to it. Passing undefined leaves 'connected'
+ * permanently empty, which is the honest behaviour for a screen with no
+ * single source item (e.g. a pure text-to-image model).
+ */
+export function usePromptSource(sourceItemId?: string): PromptSourceState {
+  const [mode, setModeState] = useState<PromptSource>(() => loadPromptSource());
+  const selected = useBoardStickies();
+  const [connected, setConnected] = useState<PromptNote[]>([]);
+
+  const setMode = useCallback((m: PromptSource) => {
+    setModeState(m);
+    savePromptSource(m);
+  }, []);
+
+  // Connector lookups hit the board API, so only run them in the mode that
+  // needs them — 'selection' and 'off' cost nothing.
+  useEffect(() => {
+    if (mode !== 'connected' || !sourceItemId) {
+      setConnected([]);
+      return;
+    }
+    let live = true;
+    void (async () => {
+      const notes = await getConnectedStickyNotes(sourceItemId);
+      if (!live) return;
+      setConnected(
+        notes
+          .map((n) => ({ id: n.id, label: (n.content ?? '').trim() }))
+          .filter((n) => n.label.length > 0),
+      );
+    })();
+    return () => {
+      live = false;
+    };
+  }, [mode, sourceItemId]);
 
   return useMemo(() => {
-    const ordered = [...stickies].sort((a, b) => (a.x ?? 0) - (b.x ?? 0));
-    return { text: orderedStickyText(ordered), anchorId: ordered[0]?.id };
-  }, [stickies]);
+    if (mode === 'off') {
+      return { mode, setMode, text: '', notes: [], isEmpty: false };
+    }
+    const notes: PromptNote[] =
+      mode === 'selection'
+        ? [...selected]
+            .sort((a, b) => (a.x ?? 0) - (b.x ?? 0))
+            .map((s) => ({ id: s.id, label: stripHtml(s.content ?? '').trim() }))
+            .filter((n) => n.label.length > 0)
+        : connected;
+    return {
+      mode,
+      setMode,
+      text: notes.map((n) => n.label).join('\n'),
+      notes,
+      isEmpty: notes.length === 0,
+      anchorId: notes[0]?.id,
+    };
+  }, [mode, setMode, selected, connected]);
+}
+
+/** The current selection as prompt text, for the one-shot "pull once" action. */
+export function useSelectionSnapshot(): () => { text: string; count: number; anchorId?: string } {
+  const selected = useBoardStickies();
+  return useCallback(() => {
+    const ordered = [...selected].sort((a, b) => (a.x ?? 0) - (b.x ?? 0));
+    return { text: orderedStickyText(ordered), count: ordered.length, anchorId: ordered[0]?.id };
+  }, [selected]);
 }

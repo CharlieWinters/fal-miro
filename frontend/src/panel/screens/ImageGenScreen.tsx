@@ -1,13 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { startAgentJob } from '../communication';
-import { useBoardReferences, useBoardStickies, useFirstSelected, orderedStickyText } from '../hooks/boardInputs';
+import {
+  useBoardReferences,
+  useBoardStickies,
+  useFirstSelected,
+  usePromptSource,
+  useSelectionSnapshot,
+} from '../hooks/boardInputs';
+import { DrivenPromptField, PromptSourceControl, PromptWaitingHint } from '../PromptSourceControl';
 import { SchemaForm } from '../SchemaForm';
 import { api, unwrapVideoEmbedUrl } from '../../lib/api';
 import {
   connectItemsToCard,
   createCardBelow,
   getConnectedReferenceImages,
-  getConnectedStickyNotes,
   resolveBoardItems,
 } from '../../shared/boardHelpers';
 import {
@@ -60,6 +66,7 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
   // Frame-aware: a prompt sticky left inside a "prompt frame" is picked up
   // the moment the frame is selected, not just when the sticky itself is.
   const selectedStickies = useBoardStickies();
+  const snapshotSelection = useSelectionSnapshot();
   const sourceImage = useFirstSelected<ImageItem>('image');
   const rawSourceVideo = useFirstSelected<EmbedItem>('embed');
   // Frame-aware: a selected frame's images/Fal-video embeds count as
@@ -77,8 +84,7 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
   const [schema, setSchema] = useState<SchemaState>({ status: 'loading' });
   const [meta, setMeta] = useState<Record<string, unknown> | null>(null);
   const [values, setValues] = useState<Record<string, unknown>>({});
-  const [editedPrompt, setEditedPrompt] = useState(false);
-  const [promptStickyId, setPromptStickyId] = useState<string | undefined>(undefined);
+  const [pulled, setPulled] = useState<number | null>(null);
   const [refCount, setRefCount] = useState(0);
   const [note, setNote] = useState<string | null>(null);
   // Multi-view models: board image assigned to each named view field.
@@ -196,6 +202,11 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
   // recipe's connected images/videos (titles included) until the user
   // selects something themselves.
   const effectiveSourceImage: ImageItem | null = sourceImage ?? seedRefs?.images[0] ?? null;
+
+  // Prompt autofill is opt-in — 'off' by default. 'connected' follows the
+  // stickies wired to whichever item this screen is working from: the source
+  // image, or the source video for video-to-video / edit models.
+  const sticky = usePromptSource(effectiveSourceImage?.id ?? sourceVideo?.id);
   const effectiveSelectedImages: ImageItem[] = selectedImages.length ? selectedImages : seedRefs?.images ?? [];
   const effectiveSourceVideo: EmbedItem | null = sourceVideo ?? seedRefs?.videos[0] ?? null;
   const effectiveSelectedVideos: EmbedItem[] = selectedVideos.length ? selectedVideos : seedRefs?.videos ?? [];
@@ -217,38 +228,34 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
     [selectedStickies],
   );
 
-  // Seed the prompt from board context (until the user edits it):
-  //  - all selected sticky notes, joined left-to-right; otherwise
-  //  - sticky notes connected to a selected image (works in any mode, so a
-  //    generator like Nano Banana picks them up when an image is selected);
-  //  - sticky notes connected to a selected video (video-to-video / edit
-  //    models, whose source is a video embed rather than an image).
+  // Mirror board-driven text into the prompt. This used to be a hidden
+  // waterfall (selection, else stickies connected to the source image, else
+  // stickies connected to the source video) that ran unconditionally and
+  // overwrote whatever had been typed. Those sources are now the 'selection'
+  // and 'connected' modes the user picks; 'off' never writes here.
   useEffect(() => {
-    if (editedPrompt || !hasPromptField) return;
-    let mounted = true;
-    void (async () => {
-      let text = '';
-      let anchorId: string | undefined;
-      if (orderedStickies.length) {
-        text = orderedStickyText(orderedStickies);
-        anchorId = orderedStickies[0]?.id;
-      } else if (sourceImage) {
-        const notes = await getConnectedStickyNotes(sourceImage.id);
-        text = notes.map((n) => n.content).filter(Boolean).join('\n');
-        anchorId = notes[0]?.id;
-      } else if (sourceVideo) {
-        const notes = await getConnectedStickyNotes(sourceVideo.id);
-        text = notes.map((n) => n.content).filter(Boolean).join('\n');
-        anchorId = notes[0]?.id;
-      }
-      if (!mounted) return;
-      setPromptStickyId(anchorId);
-      if (text) setValues((v) => ({ ...v, prompt: text }));
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [orderedStickies, sourceImage, sourceVideo, editedPrompt, hasPromptField]);
+    // `!sticky.text` matters: an empty live mode must not blank the box. The
+    // field stays editable while a mode is armed-but-waiting, so clearing it
+    // here would delete what the user just typed.
+    if (sticky.mode === 'off' || !hasPromptField || !sticky.text) return;
+    setValues((v) => ({ ...v, prompt: sticky.text }));
+  }, [sticky.mode, sticky.text, hasPromptField]);
+
+  /** Copy the current selection in once, then leave the box alone. */
+  const pullOnce = () => {
+    const { text, count } = snapshotSelection();
+    if (!count) return;
+    sticky.setMode('off');
+    setValues((v) => ({ ...v, prompt: text }));
+    setPulled(count);
+  };
+
+  /** Keep the text, hand the box back to the user. */
+  const unlink = () => {
+    setValues((v) => ({ ...v, prompt: sticky.text }));
+    sticky.setMode('off');
+    setPulled(null);
+  };
 
   // Count the reference images that will be sent.
   useEffect(() => {
@@ -297,7 +304,7 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
   }, [detectedAsset, assetEdited]);
 
   const onChange = (name: string, value: unknown) => {
-    if (name === 'prompt') setEditedPrompt(true);
+    if (name === 'prompt') setPulled(null);
     setValues((v) => ({ ...v, [name]: value }));
   };
 
@@ -339,13 +346,15 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
       const stripped = stripAssetName(input.prompt, assetCfg);
       if (stripped.trim()) input.prompt = stripped;
     }
-    if (
-      (!input.prompt || typeof input.prompt !== 'string') &&
-      orderedStickies.length === 0 &&
-      !imagePrimary &&
-      !videoPrimary
-    ) {
-      setNote('Type a prompt or select one or more sticky notes first.');
+    // Selected stickies no longer imply a prompt — only a live source mode
+    // puts their text in the box — so this checks what the board is actually
+    // supplying, not what happens to be selected.
+    if ((!input.prompt || typeof input.prompt !== 'string') && !sticky.text && !imagePrimary && !videoPrimary) {
+      setNote(
+        sticky.mode === 'off'
+          ? 'Type a prompt, or switch Prompt source to Selection to use your sticky notes.'
+          : 'Type a prompt or select one or more sticky notes first.',
+      );
       return;
     }
 
@@ -361,7 +370,7 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
       kind: isPanorama ? 'panorama' : is3d ? 'model3d' : isVideo ? 'video' : 'image',
       payload: {
         endpointId: model.endpointId,
-        stickyId: promptStickyId ?? orderedStickies[0]?.id,
+        stickyId: sticky.anchorId ?? orderedStickies[0]?.id,
         sourceImageId: takesSingle ? effectiveSourceImage?.id : undefined,
         sourceImageIds: takesMulti ? effectiveSelectedImages.map((s) => s.id) : undefined,
         sourceVideoId: takesSingleVideo ? effectiveSourceVideo?.id : undefined,
@@ -417,7 +426,10 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
     if (takesMulti) connectIds.push(...effectiveSelectedImages.map((s) => s.id));
     if (takesSingleVideo && effectiveSourceVideo) connectIds.push(effectiveSourceVideo.id);
     if (takesMultiVideo) connectIds.push(...effectiveSelectedVideos.map((s) => s.id));
-    connectIds.push(...orderedStickies.map((s) => s.id));
+    // Lineage follows the stickies that actually fed the prompt, not whatever
+    // is selected — in 'off' mode a selected sticky contributed nothing, so
+    // wiring it to the result would claim a source that wasn't used.
+    connectIds.push(...sticky.notes.map((n) => n.id));
 
     // A selected frame's contents count as connected too (mirrors how a
     // connected frame is expanded when reopening a card).
@@ -584,6 +596,37 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
             </div>
           )}
 
+          {hasPromptField && (
+            <PromptSourceControl
+              mode={sticky.mode}
+              onModeChange={(m) => {
+                sticky.setMode(m);
+                setPulled(null);
+              }}
+              onPullOnce={pullOnce}
+              canPull={snapshotSelection().count > 0}
+            />
+          )}
+
+          {hasPromptField && sticky.mode !== 'off' && sticky.isEmpty && (
+            <PromptWaitingHint mode={sticky.mode} />
+          )}
+
+          {hasPromptField && sticky.mode !== 'off' && !sticky.isEmpty && (
+            <DrivenPromptField
+              mode={sticky.mode}
+              text={sticky.text}
+              notes={sticky.notes}
+              onUnlink={unlink}
+            />
+          )}
+
+          {pulled !== null && (
+            <span className="ps-pulled">
+              Pulled {pulled} sticky note{pulled === 1 ? '' : 's'} in. Source stays Off — nothing will overwrite this.
+            </span>
+          )}
+
           <SchemaForm
             fields={fields}
             commonOrder={COMMON_ARGS[model.capability]}
@@ -595,22 +638,11 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
                 : [
                     ...((takesSingle || takesMulti) && referenceField ? [referenceField.name] : []),
                     ...((takesSingleVideo || takesMultiVideo) && videoReferenceField ? [videoReferenceField.name] : []),
+                    // A live mode renders the prompt itself, framed and read-only.
+                    ...(hasPromptField && sticky.mode !== 'off' && !sticky.isEmpty ? ['prompt'] : []),
                   ]
             }
           />
-
-          {hasPromptField && editedPrompt && (
-            <button
-              type="button"
-              className="reset-link"
-              onClick={() => {
-                setEditedPrompt(false);
-                setNote(null);
-              }}
-            >
-              ↻ Reset prompt to sticky
-            </button>
-          )}
 
           {usesImageAgent && hasPromptField && (
             <AssetNaming

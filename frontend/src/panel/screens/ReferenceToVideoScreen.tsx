@@ -5,7 +5,8 @@ import { api } from '../../lib/api';
 import { COMMON_ARGS, isBlendReference, type FalModel } from '../../shared/falCatalog';
 import { parseFalInputSchema, defaultsFor, pickAudioReferenceField, type Field } from '../../shared/schema';
 import { bindSeedanceReferences } from '../../shared/referenceBinding';
-import { useBoardReferences, useSelectedStickyText } from '../hooks/boardInputs';
+import { useBoardReferences, usePromptSource, useSelectionSnapshot } from '../hooks/boardInputs';
+import { DrivenPromptField, PromptSourceControl, PromptWaitingHint } from '../PromptSourceControl';
 import {
   connectItemsToCard,
   createCardBelow,
@@ -45,9 +46,13 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
 
   const [schema, setSchema] = useState<SchemaState>({ status: 'loading' });
   const [values, setValues] = useState<Record<string, unknown>>({});
-  const [editedPrompt, setEditedPrompt] = useState(false);
+  const [pulled, setPulled] = useState<number | null>(null);
   const refs = useBoardReferences();
-  const sticky = useSelectedStickyText();
+  // Reference-to-video has no single source image — several references feed
+  // it — so 'connected' has nothing to hang off and stays empty here. Off and
+  // Selection are the meaningful modes on this screen.
+  const sticky = usePromptSource();
+  const snapshotSelection = useSelectionSnapshot();
   const [note, setNote] = useState<string | null>(null);
 
   // A reopened settings card's connected images/videos/audio — fallback
@@ -111,11 +116,31 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.token, schema.status]);
 
-  // Seed the prompt from selected stickies until the user edits it.
+  // Mirror board-driven text into the prompt. Only in a live mode — 'off'
+  // never writes here.
   useEffect(() => {
-    if (editedPrompt) return;
-    if (sticky.text) setValues((v) => ({ ...v, prompt: sticky.text }));
-  }, [sticky.text, editedPrompt]);
+    // `!sticky.text` matters: an empty live mode must not blank the box. The
+    // field stays editable while a mode is armed-but-waiting, so clearing it
+    // here would delete what the user just typed.
+    if (sticky.mode === 'off' || !sticky.text) return;
+    setValues((v) => ({ ...v, prompt: sticky.text }));
+  }, [sticky.mode, sticky.text]);
+
+  /** Copy the current selection in once, then leave the box alone. */
+  const pullOnce = () => {
+    const { text, count } = snapshotSelection();
+    if (!count) return;
+    sticky.setMode('off');
+    setValues((v) => ({ ...v, prompt: text }));
+    setPulled(count);
+  };
+
+  /** Keep the text, hand the box back to the user. */
+  const unlink = () => {
+    setValues((v) => ({ ...v, prompt: sticky.text }));
+    sticky.setMode('off');
+    setPulled(null);
+  };
 
   // Enforce the caps (image order == token order for Seedance) — live
   // selection first, falling back to a reopened recipe's connected ids.
@@ -359,29 +384,49 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
             </div>
           )}
 
+          <PromptSourceControl
+            mode={sticky.mode}
+            onModeChange={(m) => {
+              sticky.setMode(m);
+              setPulled(null);
+            }}
+            onPullOnce={pullOnce}
+            canPull={snapshotSelection().count > 0}
+          />
+
+          {sticky.mode !== 'off' && sticky.isEmpty && <PromptWaitingHint mode={sticky.mode} />}
+
+          {sticky.mode !== 'off' && !sticky.isEmpty && (
+            <DrivenPromptField
+              mode={sticky.mode}
+              text={sticky.text}
+              notes={sticky.notes}
+              onUnlink={unlink}
+            />
+          )}
+
+          {pulled !== null && (
+            <span className="ps-pulled">
+              Pulled {pulled} sticky note{pulled === 1 ? '' : 's'} in. Source stays Off — nothing will overwrite this.
+            </span>
+          )}
+
           <SchemaForm
             fields={fields}
             commonOrder={COMMON_ARGS.video}
             values={values}
             onChange={(name, value) => {
-              if (name === 'prompt') setEditedPrompt(true);
+              if (name === 'prompt') setPulled(null);
               setValues((v) => ({ ...v, [name]: value }));
             }}
-            hide={audioField && !REFERENCE_FIELDS.includes(audioField.name) ? [...REFERENCE_FIELDS, audioField.name] : REFERENCE_FIELDS}
+            hide={[
+              ...(audioField && !REFERENCE_FIELDS.includes(audioField.name)
+                ? [...REFERENCE_FIELDS, audioField.name]
+                : REFERENCE_FIELDS),
+              // A live mode renders the prompt itself, framed and read-only.
+              ...(sticky.mode !== 'off' && !sticky.isEmpty ? ['prompt'] : []),
+            ]}
           />
-
-          {editedPrompt && (
-            <button
-              type="button"
-              className="reset-link"
-              onClick={() => {
-                setEditedPrompt(false);
-                setNote(null);
-              }}
-            >
-              ↻ Reset prompt to sticky
-            </button>
-          )}
 
           {!blend && bound && (
             <details className="preview">
