@@ -1053,6 +1053,53 @@ select:focus {
   gap: 8px;
 }
 
+/* Generic wrapping row of .ratio-chip pills (filters, size/weight toggles). */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Pattern Fill — colour swatches, option checkboxes, result preview. */
+.pf-swatch {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  padding: 0;
+}
+.pf-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 500 12px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--fg-2);
+  cursor: pointer;
+}
+.pf-check input {
+  accent-color: var(--accent);
+}
+/* Results can be transparent (background dropped), so the preview needs a
+ * checkerboard to make that legible rather than reading as black. */
+.pf-preview {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 8px;
+  display: flex;
+  justify-content: center;
+  background-color: #26262b;
+  background-image: linear-gradient(45deg, #1b1b1f 25%, transparent 25%, transparent 75%, #1b1b1f 75%),
+    linear-gradient(45deg, #1b1b1f 25%, transparent 25%, transparent 75%, #1b1b1f 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+.pf-preview img {
+  max-width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+}
+
 .empty-state {
   font: 400 13px/1.5 'Roobert PRO', system-ui, sans-serif;
   border: 1px dashed var(--border-strong);
@@ -1085,4 +1132,246 @@ input[type='range'] {
   50% {
     opacity: 1;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Prompt source control — see panel/PromptSourceControl.tsx.
+   Deliberately NOT `.seg`: nav uses a filled --card-2 track holding raised
+   pills, this is an outlined container with a flat active fill and hairline
+   dividers, under an uppercase label nav never has. Cyan (--info) means
+   "the board is driving this"; --accent stays reserved for Generate.
+   --------------------------------------------------------------------------- */
+.ps {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.ps-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ps-title {
+  font: 600 10.5px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* The one-shot verb. A pill with an icon that never latches — shape, row and
+   behaviour all say "action", so it can't read as a fourth mode. */
+.ps-pull {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: var(--card-2);
+  border: 1px solid var(--border-strong);
+  color: var(--fg-2);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: background 120ms var(--ease), color 120ms var(--ease), border-color 120ms var(--ease);
+}
+.ps-pull:hover:not(:disabled) {
+  background: #232329;
+  color: var(--fg);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+.ps-pull:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ps-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.ps-seg button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 4px;
+  border: none;
+  cursor: pointer;
+  font: 600 11px 'Roobert PRO', system-ui, sans-serif;
+  background: transparent;
+  color: var(--muted);
+}
+.ps-seg button + button {
+  border-left: 1px solid var(--border);
+}
+.ps-seg button.active {
+  background: var(--card-2);
+  color: var(--fg);
+}
+
+.ps-dot-sm {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--info);
+  flex: 0 0 auto;
+}
+
+/* A driven field is read-only and looks it: the textarea gives up its own
+   border and becomes the body of a cyan-edged frame. */
+.ps-frame {
+  border: 1px solid rgba(75, 209, 246, 0.38);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--card);
+}
+.ps-frame.empty {
+  border-color: rgba(75, 209, 246, 0.22);
+}
+.ps-frame textarea {
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  color: var(--fg-2);
+  font: 400 13px/1.5 'Roobert PRO', system-ui, sans-serif;
+  width: 100%;
+  outline: none;
+  display: block;
+  cursor: default;
+  resize: vertical;
+}
+
+.ps-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  background: rgba(75, 209, 246, 0.07);
+  border-bottom: 1px solid rgba(75, 209, 246, 0.16);
+}
+.ps-live {
+  font: 600 11px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--info);
+}
+.ps-unlink {
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--fg-2);
+  font: 600 11px 'Roobert PRO', system-ui, sans-serif;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ps-unlink:hover {
+  color: var(--fg);
+}
+
+.ps-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--info);
+  flex: 0 0 auto;
+  animation: pslive 1.6s ease-in-out infinite;
+}
+/* Armed and waiting, not broken: hollow and still. */
+.ps-dot.hollow {
+  background: transparent;
+  border: 1.5px solid var(--info);
+  animation: none;
+}
+
+@keyframes pslive {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
+.ps-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-top: 1px;
+}
+.ps-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px 7px;
+  font: 500 10.5px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--muted);
+  max-width: 100%;
+}
+.ps-chip-n {
+  color: var(--muted-2);
+  font-variant-numeric: tabular-nums;
+}
+.ps-chip-label {
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ps-empty {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--card);
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: var(--muted-2);
+}
+.ps-empty span {
+  font: 400 11.5px/1.55 'Roobert PRO', system-ui, sans-serif;
+  color: var(--fg-2);
+  text-wrap: pretty;
+}
+.ps-empty svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.ps-note {
+  font: 400 11px/1.5 'Roobert PRO', system-ui, sans-serif;
+  color: var(--muted-2);
+  text-wrap: pretty;
+}
+
+/* Confirmation after a one-shot pull — including that Off stayed Off, which
+   is the reassurance the old silent autofill never gave. */
+.ps-pulled {
+  font: 500 11px/1.5 'Roobert PRO', system-ui, sans-serif;
+  color: var(--ok);
+  text-wrap: pretty;
+}
+
+/* A live mode with nothing to supply. Sits above the ordinary editable prompt
+   field rather than replacing it — armed and waiting must never mean blocked
+   (see PromptWaitingHint). */
+.ps-waiting {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 6px;
+}
+.ps-waiting .ps-empty {
+  grid-column: 1 / -1;
 }

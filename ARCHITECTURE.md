@@ -163,6 +163,165 @@ auto-detected from the selected source image's dimensions (still overridable).
   `<|image_{n}|>` for OmniGen v1. Single-input models get the first image only.
   Data URIs go straight to Fal (no upload step yet).
 
+## Apps (curated layer)
+
+Browse ▸ Apps sits above raw model access (Category/Provider — unchanged,
+still the full catalog via the generic schema form). Per the board
+brainstorm, each app is deliberately a one-off: its own screen, its own
+orchestration, no shared "app schema" imposed across them. What *is* shared
+is the same low-level plumbing every other screen already uses — run/poll,
+board placement, lineage.
+
+There are three flavors.
+
+### Flavor 1 — pipeline apps (`src/apps/<app-id>/` + `agents/run_pipeline`)
+
+Chains one or more Fal calls with a hardcoded/templated prompt, each step's
+output feeding the next step's input. Each app gets its own folder under
+`src/apps/`, mirroring how `src/agents/<id>/` works for headless agents —
+adding an app never means editing another app's file, only adding a folder
+and one aggregator line. Recipe for a new one:
+
+1. Create `src/apps/<app-id>/index.ts`, exporting `appDef: PipelineAppDef`
+   (types + helpers from `shared/pipelineAppTypes.ts`): an ordered `steps[]`,
+   each a `{ endpointId, label, buildInput, ratioFromItemId? }`.
+   - `buildInput({ fixedInputs, priorOutputs })` builds that step's Fal
+     input. `fixedInputs` holds **board item ids only**, never resolved image
+     data — it's persisted to board appData (~30 KB cap) between steps, so
+     resolve ids to real image data *inside* `buildInput`, right when that
+     step needs it (see `resolveImageUrls`). Passing a resolved base64 image
+     through `fixedInputs` will silently come back as a `'[image]'`
+     placeholder string on the next step — this bit us once already.
+   - `ratioFromItemId` (optional): which fixedInput's board shape should
+     drive this step's placeholder size and, when the model has a matching
+     field, the actual generation request (e.g. size a sketch-to-image step
+     to the sketch, a try-on step to the model photo — not to whichever
+     image happens to be listed first).
+   - `boardLayout: boolean` on the app itself — does it lay each step's
+     output out on the board (a visual trail, each item lineage-linked to
+     the last), or keep everything inside its own panel screen? Either way
+     the run is resumable across a closed/reopened board; `boardLayout` only
+     decides *placement*, never durability.
+2. Add `src/apps/<app-id>/Screen.tsx` (see `apps/sketch-to-tryon/Screen.tsx`)
+   that collects the fixed inputs — board item ids, via "select on board →
+   Use/Add selected image(s)" — and kicks off the run:
+   `startAgentJob({ agentId: 'run_pipeline', payload: { appId, fixedInputs } })`.
+   It can import `appDef` from its own folder's `index.ts` directly (e.g. to
+   list "Models used") rather than going through the registry.
+3. Register the one new app in `shared/pipelineApps.ts` (import `appDef`,
+   add it to the `APPS` array — the only file a new app's addition touches
+   outside its own folder) and add a tile for it in `HomeScreen.tsx`'s Apps
+   section (`browseMode === 'usecase'`), calling `onOpenApp('your-app-id')`;
+   register the screen in `App.tsx`'s `openApp === 'your-app-id'` branch.
+
+The one piece of shared "magic" is `shared/pipelineRunner.ts`'s
+`advancePipelineForJob` — called from exactly two places: the live loop in
+`agents/run_pipeline` (foreground), and `resume_jobs`'s boot sweep (the board
+was closed mid-run). Both do "read persisted state → do one thing → persist
+→ return," so a reload can't behave differently than the live path would
+have. New apps never need to touch this file.
+
+**Known limitation — URL outputs only.** `advancePipelineForJob` reads a
+step's result via `outputUrl = status.output?.[0]` (from `extractOutputUrls`,
+which pulls hosted URLs/`.url` fields out of the result). A step whose useful
+output is *text* (an LLM/VQA answer, not an image/video URL) currently comes
+back with `outputUrl` undefined and gets treated as if it failed. Wiring up a
+genuinely text-output step needs `outputUrl`/`extractOutputUrls` extended
+first — not yet done.
+
+### Flavor 2 — interactive modal tools (e.g. Mask Creator)
+
+Not every app is a model pipeline — some are canvas/editor UIs that call Fal
+once (or never). These follow the existing capture-tool pattern (the older
+3D/video/panorama/rig capture tools in `panel/screens/`, which predate the
+Apps concept and stay where they are): a screen that opens fullscreen in
+`modal.html` via `miro.board.ui.openModal({ url:
+'modal.html?tool=<id>&itemId=<id>', fullscreen: true })`, routed in
+`src/modal/App.tsx`. These own their entire interaction loop (canvas
+painting, click handling); the only plumbing they reuse is image resolution
+(`boardHelpers.ts`) and, if they call a model, the same `api.run`/`getStatus`
+everything else uses.
+
+A new Flavor-2 app still gets its own folder under `src/apps/<app-id>/`
+(e.g. `apps/mask-creator/Screen.tsx`) for the same reason Flavor 1 does —
+one folder per app — even though it has no `index.ts`/`PipelineAppDef`;
+it's wired up directly by `HomeScreen.tsx` (a "For your selection" card
+calling `onOpenTool('your-tool-id', itemId)`) and `modal/App.tsx`'s routing,
+not through `pipelineApps.ts`.
+
+### Flavor 3 — no-model apps (local compositing, asset libraries)
+
+Apps that produce board content with **no Fal call at all** — they work with
+no backend configured and spend no credits. One is built: Pattern Fill (local
+image compositing).
+
+An earlier Flavor-3 app, Fashion Sketches (a PLM-style asset library shipping
+technical flats as bundled PNGs), was cut before the repo went public. It is
+preserved on the `wip/apps-snapshot` branch if the pattern is ever wanted
+again — it demonstrated the useful half of this flavor, which is that a
+panel-only app can drop rasterized content on the board without any backend
+at all.
+
+Wiring for a Flavor-3 app is the same two lines as any app: a tile in
+`HomeScreen.tsx`'s Apps section calling `onOpenApp('<app-id>')`, and the
+matching branch in `App.tsx`. Nothing in `pipelineApps.ts` — there's no
+pipeline to register.
+
+
+#### Pattern Fill (`apps/pattern-fill/`)
+
+Colours or patterns a garment flat — ported from the standalone
+**pattern-fill-miro-app** repo (`agents/pattern_fill_agent/`), which shares
+this app's three-iframe ancestry.
+
+What the port changed, and why:
+
+- **The model call is gone.** The original's only backend dependency was the
+  *mask*: a Nova Canvas `BackgroundRemoval` round trip to AWS Bedrock per
+  fill. For technical flats — dark line art on a white ground — the mask is
+  already implicit in the drawing, so `autoMask.ts` flood-fills inwards from
+  the image border through background pixels; the ink stops it, and "not
+  reached" is exactly the garment silhouette. Local, exact, ~5 ms. Where an
+  outline doesn't close (loose sunglasses temples, a flat cropped at the
+  canvas edge) the fill leaks and the mask comes back near-empty — the panel
+  detects that from the coverage figure and says so, and will read a mask
+  image off the board instead. fal-miro's **Create Mask** app (SAM 3) is what
+  makes one, so the manual path costs a model call only when it's needed.
+- **Five passes became one.** The original ran five sequential full-image
+  passes over separate canvases (transparent layer → pattern layer → applied
+  mask → 3-step composite → keep-mask). The layers only ever combine
+  per-pixel, so `fill.ts`'s `composite()` is a single pass with the same
+  formulas. Writing the algebra out surfaced that the original's "composite
+  step 3" is a **no-op whenever the fill layer is opaque** — which it always
+  is for a solid colour — since step 2's alpha is already 255; it's kept for
+  patterns that carry real transparency, where it still bites.
+- **Multiply mode is the whole trick.** It multiplies the flat's own greys
+  into the fill instead of painting over them, which is what keeps seams,
+  topstitching, ribbing and shading readable. Turning it off returns a flat
+  silhouette — the toggle is there to make that visible, not because it's a
+  reasonable default.
+- **Not ported:** the mask paint editor and the pattern crop editor (two
+  modal editors), and `VirtualTryOn`. Create Mask covers mask production;
+  tile size covers most of what crop was for. Try-on isn't pattern fill —
+  Sketch to Try-On already owns that step.
+
+**Getting pixels off the board: `getImagePixelRef`, not `getImageRef`.**
+`getImageUrl` (behind `getImageRef`) prefers the hosted fal.media URL,
+because every other caller sends that URL *to Fal*, where a URL beats a
+multi-MB base64 body. Local pixel work wants the exact opposite: a
+cross-origin image taints the canvas — or, with `crossOrigin="anonymous"`
+and no `Access-Control-Allow-Origin` from that host, refuses to load at all.
+So `getImagePixelRef` (`boardHelpers.ts`) tries `getDataUrl()` first: a
+`data:` URI is same-origin by definition, so it needs no CORS, no `/proxy`,
+and **no backend** — which is what makes the app's "no credits, no backend"
+claim actually true. Pattern Fill shipped with the wrong resolver at first
+and failed on a fal.media-hosted garment with a dead-proxy error; the two
+resolvers now say in their doc comments which job each is for.
+`loadPixelImage` still falls back to a direct cross-origin load and then to
+`/proxy`, for images Miro won't hand over bytes for — that's the only path
+here that touches a backend, and it reports *that* rather than echoing a URL
+when both fail.
+
 ## What's NOT built yet (next milestones)
 
 - **The generic schema form + Advanced section** — currently the image screen

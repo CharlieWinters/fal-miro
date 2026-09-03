@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { HomeScreen, type CaptureTool } from './screens/HomeScreen';
+import { HomeScreen, type BrowseMode, type CaptureTool } from './screens/HomeScreen';
 import { ImageGenScreen } from './screens/ImageGenScreen';
 import { FirstLastVideoScreen } from './screens/FirstLastVideoScreen';
 import { ReferenceToVideoScreen } from './screens/ReferenceToVideoScreen';
@@ -10,6 +10,10 @@ import { MergeVideosScreen } from './screens/MergeVideosScreen';
 import { MergeAudioVideoScreen } from './screens/MergeAudioVideoScreen';
 import { RiggingScreen } from './screens/RiggingScreen';
 import { SoundScreen } from './screens/SoundScreen';
+import { SketchToTryOnScreen } from '../apps/sketch-to-tryon/Screen';
+import { MaskCreatorScreen } from '../apps/mask-creator/Screen';
+import { NanoBananaPatternScreen } from '../apps/nano-banana-pattern/Screen';
+import { PatternFillScreen } from '../apps/pattern-fill/Screen';
 import { ActiveJobsTray } from './ActiveJobsTray';
 import { CreditsBadge } from './CreditsBadge';
 import {
@@ -120,10 +124,10 @@ function FamilyScreen({ family, seed }: { family: ModelFamily; seed?: RecipeSeed
 }
 
 /**
- * Shown between "backend configured" and "catalog settled" — covers the gap
- * where only the ~40-entry hand list would otherwise be visible before the
- * synced long tail arrives, which read as a broken/incomplete list rather
- * than a catalog still loading.
+ * Shown between "backend configured" and "catalog settled". The catalog is
+ * synced from fal at runtime with no built-in list behind it, so without this
+ * a first-ever load would show an empty Browse grid that reads as broken
+ * rather than as a catalog still arriving.
  */
 function CatalogLoadingScreen() {
   return (
@@ -139,6 +143,11 @@ function App() {
   const [model, setModel] = useState<FalModel | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [recipeSeed, setRecipeSeed] = useState<RecipeSeed | null>(null);
+  const [openApp, setOpenApp] = useState<string | null>(null);
+  // Which Browse tab HomeScreen shows. Owned here rather than in HomeScreen
+  // because opening an app (or a model) unmounts HomeScreen entirely — local
+  // state there would drop the user back on Category every time they hit Back.
+  const [browseMode, setBrowseMode] = useState<BrowseMode>('category');
   // Reading localStorage is synchronous, so this is known on first render —
   // false forces the settings screen (nothing else can run without a
   // backend); no public default, so an unconfigured install fails closed
@@ -148,7 +157,7 @@ function App() {
   const catalogReady = useCatalogReady();
 
   // Load the persisted curation filter, then sync the full model catalog from
-  // fal metadata (merged over the hand list). Both push into the live catalog.
+  // fal metadata. Both push into the live catalog.
   useEffect(() => {
     if (!backendReady) return;
     getCatalogFilter()
@@ -161,10 +170,10 @@ function App() {
         // Cache for next load — see falCatalog.ts's readCachedSyncedModels.
         cacheSyncedModels(res.models);
       })
-      .catch((e) => console.warn('[App] catalog sync failed — using built-in list', e))
+      .catch((e) => console.warn('[App] catalog sync failed', e))
       // Either way, the catalog has settled — stop showing the loading screen.
-      // A failed sync still leaves a usable (hand-only) list, which beats a
-      // loading state stuck forever.
+      // A failed sync leaves whatever the cache had (nothing, on a first-ever
+      // load), which still beats a loading state stuck forever.
       .finally(markCatalogReady);
     getFavourites()
       .then(applyFavourites)
@@ -189,6 +198,7 @@ function App() {
     setFamily(null);
     setShowSettings(false);
     setRecipeSeed(null);
+    setOpenApp(null);
   };
 
   // Explicit reopen trigger (the "For your selection" ToolCard on a settings
@@ -229,7 +239,7 @@ function App() {
   return (
     <div className="app">
       <div className="topbar">
-        {(model || family || showSettings) && (
+        {(model || family || showSettings || openApp) && (
           <button type="button" className="back-link" onClick={goBack} aria-label="Back">
             ← Back
           </button>
@@ -246,12 +256,23 @@ function App() {
           <SettingsScreen onBackendConfigured={() => setBackendReady(true)} />
         ) : !catalogReady ? (
           <CatalogLoadingScreen />
+        ) : openApp === 'sketch-to-tryon' ? (
+          <SketchToTryOnScreen />
+        ) : openApp === 'mask-creator' ? (
+          <MaskCreatorScreen />
+        ) : openApp === 'nano-banana-pattern' ? (
+          <NanoBananaPatternScreen />
+        ) : openApp === 'pattern-fill' ? (
+          <PatternFillScreen />
         ) : model ? (
           <ModelScreen model={model} seed={recipeSeed} />
         ) : family ? (
           <FamilyScreen key={family.key} family={family} seed={recipeSeed} />
         ) : (
           <HomeScreen
+            browseMode={browseMode}
+            onBrowseModeChange={setBrowseMode}
+            onOpenApp={setOpenApp}
             onSelectFamily={selectFamily}
             onSelectModel={setModel}
             onOpenTool={openCaptureModal}
