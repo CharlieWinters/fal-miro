@@ -52,14 +52,36 @@ const handleMessage = async (event: MessageEvent) => {
     const data = await agent.run(payload, requestId);
     broadcastUpdate({ requestId, status: 'succeeded', data });
   } catch (err) {
-    console.error(`[headless] Agent "${agentId}" failed:`, err);
+    console.error(`[headless] Agent "${agentId}" failed:`, err, describeApiErrorBody(err));
     broadcastUpdate({
       requestId,
       status: 'failed',
-      message: err instanceof Error ? err.message : String(err),
+      message: describeApiErrorBody(err) ?? (err instanceof Error ? err.message : String(err)),
     });
   }
 };
+
+/**
+ * `err.message` on a client-mode (@fal-ai/client) validation error is just
+ * "Unprocessable Entity" — the actual per-field reason lives in `err.body`
+ * (FastAPI-style `{ detail: [{ loc, msg, type }] }`, or occasionally a plain
+ * string). Duck-typed rather than importing the SDK's error classes, since
+ * this handler is agent-agnostic and a backend-mode failure won't have this
+ * shape at all.
+ */
+function describeApiErrorBody(err: unknown): string | null {
+  const body = (err as { body?: unknown } | null)?.body;
+  if (!body || typeof body !== 'object') return null;
+  const detail = (body as { detail?: unknown }).detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail.map((d) =>
+      d && typeof d === 'object' ? `${(d as { loc?: unknown[] }).loc?.join('.') ?? ''}: ${(d as { msg?: unknown }).msg ?? ''}` : String(d),
+    );
+    if (parts.length) return parts.join('; ');
+  }
+  return null;
+}
 
 export function initializeMessageListener(): void {
   if (listenerAttached) return;

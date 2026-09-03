@@ -16,6 +16,7 @@ import {
 import { extractAnimations, extractRestPose } from '../../../shared/meshyAnimations';
 import { estimateCostUSD, reportedInferenceSeconds } from '../../../shared/cost';
 import { placeGenericOutput } from '../../../shared/genericOutput';
+import { advancePipelineForJob } from '../../../shared/pipelineRunner';
 
 /**
  * Walk the persisted active-jobs list and check each one's current status with
@@ -56,6 +57,12 @@ function isTerminal(status: StatusResponse['status']): boolean {
 }
 
 async function finalize(job: ActiveJob, s: StatusResponse): Promise<void> {
+  // Pipeline steps hand off to the shared advance logic instead of the normal
+  // single-model placement below — it's the same function the live pipeline
+  // loop calls after a foreground poll, so a reload can't behave differently
+  // from what would have happened had the board stayed open.
+  if (await advancePipelineForJob(job, s)) return;
+
   const pos = job.targetPosition;
   const outputUrl = s.output?.[0];
   if (s.status === 'SUCCEEDED' && outputUrl) {
@@ -75,28 +82,45 @@ async function finalize(job: ActiveJob, s: StatusResponse): Promise<void> {
         });
       }
       await setItemGenerationSettings(itemId, settings);
-    } else if (job.kind === 'video' || job.kind === 'model3d' || job.kind === 'panorama' || job.kind === 'rig') {
+    } else if (job.kind === 'rig') {
+      // One embed per animation clip, laid out in a row — mirrors fal_rig's
+      // live-path finalize (see its own comment) so a reload can't behave
+      // differently from what would have happened had the board stayed open.
+      const { width, height } = parseRatio(job.settings.ratio, 720);
+      const abs = await resolveAbsolutePosition(job.placeholderId);
+      const baseX = abs?.absoluteX ?? pos?.x ?? 0;
+      const baseY = abs?.absoluteY ?? pos?.y ?? 0;
+      await deleteItem(job.placeholderId);
+
+      const animations = extractAnimations(s.data);
+      const settings = { ...job.settings, restPoseUrl: extractRestPose(s.data) ?? undefined };
+      if (settings.costUSD == null) {
+        settings.costUSD = await estimateCostUSD(job.endpointId, {
+          units: 1,
+          seconds: reportedInferenceSeconds(s.data),
+        });
+      }
+
+      const clips = animations.length ? animations : [{ name: 'Animation', url: outputUrl }];
+      const gapX = 40;
+      for (let i = 0; i < clips.length; i++) {
+        const clip = clips[i];
+        const x = baseX + i * (width + gapX);
+        const embed = await createEmbedAtPosition({ url: rigEmbedUrl(clip.url), x, y: baseY, width, height });
+        await setItemGenerationSettings(embed.id, { ...settings, animations: [clip] });
+      }
+    } else if (job.kind === 'video' || job.kind === 'model3d' || job.kind === 'panorama') {
       // Swap the placeholder image for an inline embed (video player, 3D
-      // viewer, 360 photosphere, or animated rig — same as the live agents).
+      // viewer, or 360 photosphere — same as the live agents).
       const { width, height } = parseRatio(job.settings.ratio, 720);
       const abs = await resolveAbsolutePosition(job.placeholderId);
       const x = abs?.absoluteX ?? pos?.x ?? 0;
       const y = abs?.absoluteY ?? pos?.y ?? 0;
       await deleteItem(job.placeholderId);
       const embedUrl =
-        job.kind === 'model3d'
-          ? model3dEmbedUrl(outputUrl)
-          : job.kind === 'panorama'
-            ? panoramaEmbedUrl(outputUrl)
-            : job.kind === 'rig'
-              ? rigEmbedUrl(outputUrl)
-              : videoEmbedUrl(outputUrl);
+        job.kind === 'model3d' ? model3dEmbedUrl(outputUrl) : job.kind === 'panorama' ? panoramaEmbedUrl(outputUrl) : videoEmbedUrl(outputUrl);
       const embed = await createEmbedAtPosition({ url: embedUrl, x, y, width, height });
-      // Rig: recover the clip list + rest pose so the pose tools still work.
-      const settings =
-        job.kind === 'rig'
-          ? { ...job.settings, animations: extractAnimations(s.data), restPoseUrl: extractRestPose(s.data) ?? undefined }
-          : { ...job.settings };
+      const settings = { ...job.settings };
       // Backfill cost if the live agent never got to stamp it (e.g. the job
       // timed out and finished in the background). Time-billed models bill on
       // Fal's reported compute time.

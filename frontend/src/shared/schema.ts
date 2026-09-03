@@ -275,6 +275,21 @@ export function pickVideoReferenceField(
   return { name: chosen.name, multiple: Boolean(chosen.videoMultiple), required: chosen.required };
 }
 
+// The model's primary free-text field — the one a selected sticky's text (or
+// a reopened recipe's connected sticky) should drive. `prompt` is by far the
+// most common name; several real models — mostly TTS (Orpheus, ElevenLabs,
+// ChatterboxHD) — use `text` instead. Checked in this order since a model
+// could in principle have both; `prompt` wins if so.
+const PROMPT_FIELD_NAMES = ['prompt', 'text'];
+
+export function pickPromptField(fields: Field[]): Field | undefined {
+  for (const name of PROMPT_FIELD_NAMES) {
+    const field = fields.find((f) => f.name === name);
+    if (field) return field;
+  }
+  return undefined;
+}
+
 /**
  * Pick the field that a board-selected audio clip should flow into (e.g.
  * Seedance 2.5's `audio_urls`). Same preference order as

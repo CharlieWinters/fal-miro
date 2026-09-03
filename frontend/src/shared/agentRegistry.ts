@@ -10,6 +10,7 @@ import { agentMeta as falRig } from '../agents/fal_rig';
 import { agentMeta as falFfmpegMerge } from '../agents/fal_ffmpeg_merge';
 import { agentMeta as falGeneric } from '../agents/fal_generic';
 import { agentMeta as resumeJobs } from '../agents/resume_jobs';
+import { agentMeta as runPipeline } from '../agents/run_pipeline';
 
 export interface AgentMeta {
   id: string;
@@ -26,6 +27,7 @@ export const agentList: AgentMeta[] = [
   falFfmpegMerge,
   falGeneric,
   resumeJobs,
+  runPipeline,
 ];
 
 export const agentRegistry = agentList.reduce(
