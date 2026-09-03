@@ -8,7 +8,6 @@ import { logBox, summarizeInput } from './lib/logging.js';
 import { extractOutputUrls, normalizeStatus } from './lib/output.js';
 import { falError, messageOf } from './lib/errors.js';
 import { jsonResponse } from './lib/http.js';
-import { exchangeMiroCode, getValidMiroAccessToken, hasMiroToken, storeMiroToken } from './lib/miroOauth.js';
 
 // Runtime-agnostic Hono app — the same routes/logic run on Node
 // (src/node.ts) and Cloudflare Workers (src/worker.ts). The FAL_KEY lives
@@ -45,18 +44,6 @@ app.use(
 // /proxy is hardened separately below by restricting which hosts it'll fetch.
 // ---------------------------------------------------------------------------
 app.use('/api/fal/*', async (c, next) => {
-  const { backendKey } = resolveEnv(c);
-  if (!backendKey) {
-    return c.json({ error: 'This deployment has no BACKEND_KEY configured — set one before use.' }, 500);
-  }
-  if (c.req.header('x-fal-proxy-key') !== backendKey) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-  return next();
-});
-
-// Same rule, same reasoning, for the Miro-documents API below.
-app.use('/api/miro/*', async (c, next) => {
   const { backendKey } = resolveEnv(c);
   if (!backendKey) {
     return c.json({ error: 'This deployment has no BACKEND_KEY configured — set one before use.' }, 500);
@@ -472,145 +459,6 @@ app.get('/api/fal/estimate', async (c) => {
     });
   } catch (err) {
     console.error('[estimate] error:', err);
-    return c.json({ error: messageOf(err) }, 502);
-  }
-});
-
-// ---------------------------------------------------------------------------
-// Miro OAuth — lets the backend call Miro's REST API as a specific person,
-// for the one thing the Web SDK can't do: read a Doc-format item's text
-// content (see boardHelpers.getDocumentText on the frontend). Authorization-
-// code flow (see lib/miroOauth.ts); tokens are keyed by Miro user id, not
-// board or team.
-//
-// `state` here is just the user id, not a signed/random nonce — this app has
-// no session/cookie concept at all (see the BACKEND_KEY model above), so a
-// stricter CSRF-safe nonce would need session storage this app doesn't have.
-// Acceptable for a self-hosted, single-tenant deployment; revisit if this
-// backend is ever exposed multi-tenant.
-//
-// Not behind the /api/miro/* BACKEND_KEY gate below — these are full-page
-// browser navigations (the redirect to Miro, and Miro's redirect back), not
-// fetch() calls that could attach a custom header.
-//
-//   GET /oauth/start?userId=<miro user id>
-//   GET /oauth/callback?code=...&state=<userId>
-// ---------------------------------------------------------------------------
-app.get('/oauth/start', (c) => {
-  const { miroClientId, miroRedirectUri } = resolveEnv(c);
-  const userId = c.req.query('userId');
-  if (!miroClientId || !miroRedirectUri) {
-    return c.json({ error: 'MIRO_CLIENT_ID / MIRO_REDIRECT_URI not configured on this backend.' }, 500);
-  }
-  if (!userId) return c.json({ error: 'userId query param is required' }, 400);
-
-  const url = new URL('https://miro.com/oauth/authorize');
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('client_id', miroClientId);
-  url.searchParams.set('redirect_uri', miroRedirectUri);
-  url.searchParams.set('state', userId);
-  return c.redirect(url.toString());
-});
-
-app.get('/oauth/callback', async (c) => {
-  const { miroClientId, miroClientSecret, miroRedirectUri } = resolveEnv(c);
-  const code = c.req.query('code');
-  const userId = c.req.query('state');
-  if (!miroClientId || !miroClientSecret || !miroRedirectUri) {
-    return c.json(
-      { error: 'MIRO_CLIENT_ID / MIRO_CLIENT_SECRET / MIRO_REDIRECT_URI not configured on this backend.' },
-      500,
-    );
-  }
-  if (!code || !userId) {
-    return c.json({ error: 'Missing code or state from Miro' }, 400);
-  }
-  try {
-    const token = await exchangeMiroCode({
-      clientId: miroClientId,
-      clientSecret: miroClientSecret,
-      code,
-      redirectUri: miroRedirectUri,
-    });
-    await storeMiroToken(c, userId, token);
-    console.log(`[oauth/callback] stored a token for userId=${userId}`);
-    return c.html('<p>Connected to Miro — you can close this tab and go back to the board.</p>');
-  } catch (err) {
-    console.error('[oauth/callback] error:', messageOf(err));
-    return c.html(`<p>Failed to connect: ${messageOf(err)}</p>`, 502);
-  }
-});
-
-// Status check — is this Miro account currently connected? Doesn't refresh
-// or validate the token, just reports presence, for a Settings-screen
-// indicator (and to tell a lost-in-memory-store restart apart from a failed
-// exchange without guessing).
-//   GET /api/miro/status?userId=...  → { connected: boolean }
-app.get('/api/miro/status', async (c) => {
-  const userId = c.req.query('userId');
-  if (!userId) return c.json({ error: 'userId query param is required' }, 400);
-  return c.json({ connected: await hasMiroToken(c, userId) });
-});
-
-// ---------------------------------------------------------------------------
-// Read a Doc-format item's content — the one thing the Web SDK can't do.
-//
-//   GET /api/miro/documents/:itemId?boardId=...&userId=...
-//   → { content: string, contentVersion: number | null }
-//
-// Uses the generic "Get item" endpoint (GET /v2/boards/{id}/items/{itemId})
-// rather than a type-specific `doc_formats` path — confirmed live that the
-// latter isn't a real route (Miro's API rejected it with a validation error
-// naming a completely different type enum). The generic item endpoint needs
-// no type-specific path at all, and its response already carries
-// `data.content`/`data.contentVersion` for a Doc-format item, same as
-// confirmed via board_list_items during development.
-// ---------------------------------------------------------------------------
-function boardItemUrl(boardId: string, itemId: string): string {
-  return `https://api.miro.com/v2/boards/${encodeURIComponent(boardId)}/items/${encodeURIComponent(itemId)}`;
-}
-
-app.get('/api/miro/documents/:itemId', async (c) => {
-  const { miroClientId, miroClientSecret } = resolveEnv(c);
-  try {
-    const itemId = c.req.param('itemId');
-    const boardId = c.req.query('boardId');
-    const userId = c.req.query('userId');
-    if (!boardId || !userId) {
-      return c.json({ error: 'boardId and userId query params are required' }, 400);
-    }
-    if (!miroClientId || !miroClientSecret) {
-      return c.json({ error: 'MIRO_CLIENT_ID / MIRO_CLIENT_SECRET not configured on this backend.' }, 500);
-    }
-
-    const accessToken = await getValidMiroAccessToken(c, userId, {
-      clientId: miroClientId,
-      clientSecret: miroClientSecret,
-    });
-    if (!accessToken) {
-      return c.json(
-        { error: 'This Miro account isn’t connected yet — use "Connect Miro account" in Settings.' },
-        401,
-      );
-    }
-
-    const upstream = await fetch(boardItemUrl(boardId, itemId), {
-      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
-    });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const payload: any = await upstream.json().catch(() => null);
-    if (!upstream.ok) {
-      return jsonResponse({ error: payload?.message ?? `Miro documents API ${upstream.status}` }, upstream.status);
-    }
-
-    const content = payload?.data?.content ?? payload?.content ?? null;
-    const contentVersion = payload?.data?.contentVersion ?? payload?.content_version ?? null;
-    if (typeof content !== 'string') {
-      return c.json({ error: 'Unexpected response shape from Miro documents API' }, 502);
-    }
-    return c.json({ content, contentVersion });
-  } catch (err) {
-    console.error('[documents] error:', messageOf(err));
     return c.json({ error: messageOf(err) }, 502);
   }
 });

@@ -296,31 +296,7 @@ export const api = {
             (seconds && seconds > 0 ? `&seconds=${seconds}` : ''),
         ),
 
-  /**
-   * Read a Doc-format item's text content — the one thing the Web SDK can't
-   * do, so it goes through the backend's Miro OAuth token instead of a
-   * regular Fal-proxy call. 401s with a clear message if `userId` (from
-   * `miro.board.getUserInfo()`) hasn't connected a Miro account yet.
-   */
-  getDocumentContent: (boardId: string, itemId: string, userId: string) =>
-    request<{ content: string; contentVersion: number | null }>(
-      `/api/miro/documents/${encodeURIComponent(itemId)}?boardId=${encodeURIComponent(boardId)}&userId=${encodeURIComponent(userId)}`,
-    ),
-
-  /** Whether `userId` currently has a Miro account connected (Settings status indicator). */
-  getMiroStatus: (userId: string) =>
-    request<{ connected: boolean }>(`/api/miro/status?userId=${encodeURIComponent(userId)}`),
 };
-
-/**
- * URL that starts the Miro OAuth flow for `userId` — open in a new tab
- * (`window.open`), not this iframe; Miro's authorize screen refuses to render
- * inside one. No in-app callback handling needed: the backend's
- * /oauth/callback just shows a plain "connected, close this tab" page.
- */
-export function miroConnectUrl(userId: string): string {
-  return `${backendUrl()}/oauth/start?userId=${encodeURIComponent(userId)}`;
-}
 
 // Embed pages ship as static files with the frontend itself (embed-video.html
 // etc, at the project root) — not the backend. None of them need a backend at
