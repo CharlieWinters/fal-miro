@@ -1,17 +1,21 @@
-// Central catalog of Fal model endpoints, grouped by capability.
+// The model catalog. There is no hand-maintained model list here — the
+// catalog IS fal's, synced at runtime from /api/fal/models and cached in
+// localStorage between sessions. Models change faster than a checked-in list
+// can track, so nothing in this file names a model you have to keep updating.
 //
-// In Option A (the chosen approach) this file stays small: it lists which
-// endpoints the app exposes and which capability each belongs to. The actual
-// input controls are generated at runtime from each model's live OpenAPI
-// schema (fetched via the backend /api/fal/schema route), split into the
-// "always-shown" common tier below and a generic "Advanced" section.
+// What this file does own:
+//   • mapping fal's `category` → this app's capability + which screen opens
+//     (FAL_CATEGORY_MAP);
+//   • a short list of per-endpoint behaviour overrides for the handful of
+//     endpoints with a bespoke screen that fal's metadata can't describe
+//     (ENDPOINT_OVERRIDES / EXTRA_TASKS below);
+//   • the Provider ▸ Model(family) ▸ Task browse grouping, derived from the
+//     synced metadata rather than declared per model.
 //
-// NAVIGATION (redesign): each entry also declares the `family` it belongs to
-// (the "model", e.g. "Veo 3.1") and its `task` within that family (e.g. "Image
-// to Video", "Edit"). Browse is Provider ▸ Model(family) ▸ Task, plus a
-// Category axis (fal-style input→output categories). These fields are set here
-// today; the plan is to source family/category/tags from fal's per-endpoint
-// metadata (already returned by /api/fal/schema) so the list self-maintains.
+// Input controls are generated at runtime from each model's live OpenAPI
+// schema (via the backend /api/fal/schema route), split into the
+// "always-shown" common tier at the bottom of this file and a generic
+// "Advanced" section.
 
 export type Capability =
   | 'image'
@@ -40,8 +44,6 @@ export type FalModel = {
   /** Consumer-friendly label shown on the (searchable) home screen. */
   label: string;
   capability: Capability;
-  /** Hidden from the home screen unless SHOW_EXPERIMENTAL is on. */
-  experimental?: boolean;
   /** Video model that takes two frames (first/start + last/end) → two-slot screen. */
   twoFrame?: boolean;
   /**
@@ -54,87 +56,112 @@ export type FalModel = {
   family?: string;
   /** Task label within the family. e.g. "Image to Video", "Edit", "Generate". */
   task?: string;
-  /** Explicit category label (synced models carry fal's; hand models derive it). */
+  /** Category label, mapped from fal's own `category` (see FAL_CATEGORY_MAP). */
   category?: string;
-  /** Force the generic schema screen (synced long-tail: audio, LLM, training…). */
+  /** Force the generic schema screen (long-tail: audio, LLM, training…). */
   screen?: 'generic';
-  /** Marks an auto-synced entry (from fal metadata) vs a hand-curated one. */
-  synced?: boolean;
   /** Model thumbnail from fal metadata, if any. */
   thumbnailUrl?: string;
 };
 
-// Flip to true to surface the experimental models (Flux family, Seedance, TTS,
-// Veo first-last-frame) in the home screen. Off for the golden demo, which is
-// focused on Nano Banana (image) + Veo 3.1 (video).
-export const SHOW_EXPERIMENTAL = false;
+// ---------------------------------------------------------------------------
+// Per-endpoint behaviour overrides.
+//
+// NOT a model list. These are the routing flags that decide which *screen* an
+// endpoint opens, for the handful of endpoints this app has a bespoke screen
+// for. fal's metadata has no way to express "this one opens the rigging
+// screen" or "this one takes two frames", so those few facts live here.
+// Matched by pattern against the synced catalog — an endpoint fal retires
+// simply stops matching, and a new one fal adds needs no change here unless
+// it wants a bespoke screen.
+// ---------------------------------------------------------------------------
+// Capability only — never `category`. categoryOf() derives the category label
+// from the capability, and those derived labels are the ones
+// DEFAULT_MEDIA_CATEGORIES ships with; writing a prettier category here (e.g.
+// "Extract object" for segmentation) would put the model in a category the
+// default curation filter doesn't allow, and silently hide it.
+//
+// `whenCategory` is what keeps these honest. A name pattern alone is far too
+// blunt on a 1,500-model catalog: "sam-3" also matches `sam-3/3d-body` and
+// `sam-3/video`, "hunyuan_world" also matches `hunyuan_world/image-to-world`,
+// and every "interpolate" pattern also matches two LoRA trainers. Gating on
+// fal's own category makes each rule say what it actually means — "a SAM
+// endpoint that takes an image and returns an image" — instead of "anything
+// with SAM in the name".
+type EndpointOverride = {
+  match: RegExp;
+  /** Only apply when fal's own category is exactly this. */
+  whenCategory?: string;
+  /** Escape hatch for a sibling the pattern catches but shouldn't. */
+  exclude?: RegExp;
+  apply: Partial<FalModel>;
+  task?: string;
+};
 
-export const FAL_MODELS: FalModel[] = [
-  // ── Golden-demo models (enabled) ───────────────────────────────────────
-  { endpointId: 'fal-ai/nano-banana/edit', label: 'Nano Banana (edit)', capability: 'image', family: 'Nano Banana', task: 'Edit' },
-  { endpointId: 'fal-ai/gemini-3-pro-image-preview/edit', label: 'Nano Banana Pro (edit)', capability: 'image', family: 'Nano Banana', task: 'Edit · Pro' },
-  // Text-to-image generators (image optional → selected/connected stickies fill the prompt).
-  { endpointId: 'fal-ai/nano-banana', label: 'Nano Banana · Generate (text→image)', capability: 'image', generate: true, family: 'Nano Banana', task: 'Generate' },
-  { endpointId: 'fal-ai/nano-banana-pro', label: 'Nano Banana Pro · Generate (text→image)', capability: 'image', generate: true, family: 'Nano Banana', task: 'Generate · Pro' },
-  { endpointId: 'fal-ai/flux-2-pro', label: 'FLUX.2 [pro] · Generate', capability: 'image', generate: true, family: 'FLUX.2', task: 'Generate · Pro' },
-  { endpointId: 'fal-ai/flux-2', label: 'FLUX.2 [dev] · Generate (cheaper)', capability: 'image', generate: true, family: 'FLUX.2', task: 'Generate · Dev' },
-  // Seedream (ByteDance) — the source-image generator for the Seedance video
-  // pipeline. Seedance's moderation flags realistic AI images from OTHER
-  // providers (Flux / Nano Banana / Veo frames) as real-person likenesses and
-  // rejects them; frames made by ByteDance's own image model pass, so generate
-  // people/source frames here when they're bound for Seedance. Both a text→image
-  // generator and a multi-image edit endpoint; 4.5 is latest, 4.0 kept as backup.
-  { endpointId: 'fal-ai/bytedance/seedream/v4.5/text-to-image', label: 'Seedream 4.5 · Generate (text→image)', capability: 'image', generate: true, family: 'Seedream 4.5', task: 'Generate' },
-  { endpointId: 'fal-ai/bytedance/seedream/v4.5/edit', label: 'Seedream 4.5 (edit)', capability: 'image', family: 'Seedream 4.5', task: 'Edit' },
-  { endpointId: 'fal-ai/bytedance/seedream/v4/text-to-image', label: 'Seedream 4.0 · Generate (text→image)', capability: 'image', generate: true, family: 'Seedream 4.0', task: 'Generate' },
-  { endpointId: 'fal-ai/bytedance/seedream/v4/edit', label: 'Seedream 4.0 (edit)', capability: 'image', family: 'Seedream 4.0', task: 'Edit' },
-  { endpointId: 'fal-ai/veo3.1/image-to-video', label: 'Veo 3.1 · Image to Video', capability: 'video', family: 'Veo 3.1', task: 'Image to Video' },
-  { endpointId: 'fal-ai/veo3.1/fast/image-to-video', label: 'Veo 3.1 Fast · Image to Video', capability: 'video', family: 'Veo 3.1', task: 'Image to Video · Fast' },
-  { endpointId: 'fal-ai/sam-3/image', label: 'SAM 3 · Extract object', capability: 'segment', family: 'SAM 3', task: 'Extract object' },
-  // Image to 3D — drops an orbit-able .glb viewer embed on the board. Hunyuan3D
-  // v2 is the balanced default ($0.16, glb); TripoSR is the fast/cheap option
-  // (~0.5s, $0.07); Hunyuan3D v3 is the high-quality (PBR) one.
-  { endpointId: 'fal-ai/hunyuan3d/v2', label: 'Hunyuan3D v2 · Image to 3D', capability: 'model3d', family: 'Hunyuan3D v2', task: 'Image to 3D' },
-  { endpointId: 'fal-ai/triposr', label: 'TripoSR · Image to 3D (fast)', capability: 'model3d', family: 'TripoSR', task: 'Image to 3D' },
-  { endpointId: 'fal-ai/hunyuan3d-v3/image-to-3d', label: 'Hunyuan3D v3 · Image to 3D (quality)', capability: 'model3d', family: 'Hunyuan3D v3', task: 'Image to 3D' },
-  // Image to 3D panorama — Hunyuan World turns an image + prompt into an
-  // equirectangular 360° environment; drops an interactive photosphere embed.
-  { endpointId: 'fal-ai/hunyuan_world', label: 'Hunyuan World · Image to Panorama', capability: 'panorama', family: 'Hunyuan World', task: 'Image to Panorama' },
-  // 3D → rigged + animated character. Source is a 3D model already on the board;
-  // output is an animated viewer you can pose via the "Rig Viewer → Image" tool.
-  { endpointId: 'fal-ai/meshy/rigging/multi-animation', label: 'Meshy · Rig + Animate (character)', capability: 'rig', family: 'Meshy Rig', task: 'Rig + Animate' },
-  // Video → sound: generate a soundtrack/foley for a board video; output is the
-  // same video with audio muxed in.
-  { endpointId: 'fal-ai/thinksound', label: 'ThinkSound · Video to Sound (auto)', capability: 'sound', family: 'ThinkSound', task: 'Video to Sound' },
-  { endpointId: 'fal-ai/mmaudio-v2', label: 'MMAudio v2 · Video to Sound', capability: 'sound', family: 'MMAudio', task: 'Video to Sound' },
-  { endpointId: 'fal-ai/hunyuan-video-foley', label: 'Hunyuan Foley · Video to Sound', capability: 'sound', family: 'Hunyuan Foley', task: 'Video to Sound' },
-  // Merge ops — Fal's FFmpeg endpoints. Operate on videos already on the board.
-  { endpointId: 'fal-ai/ffmpeg-api/merge-videos', label: 'Merge Videos (concatenate)', capability: 'merge', family: 'FFmpeg utilities', task: 'Merge Videos' },
-  { endpointId: 'fal-ai/ffmpeg-api/merge-audio-video', label: 'Merge Audio + Video', capability: 'merge', family: 'FFmpeg utilities', task: 'Merge Audio + Video' },
-  // Veo 3.1 — best quality + native audio, but Gemini blocks identifiable PEOPLE.
-  { endpointId: 'fal-ai/veo3.1/first-last-frame-to-video', label: 'Veo 3.1 · First+Last Frame', capability: 'video', twoFrame: true, family: 'Veo 3.1', task: 'First + Last' },
-  // Seedance — for the human scenes Veo refuses.
-  // 1.5 Pro is the people-friendly one (works in practice). 2.0 is newer but, like
-  // Veo, blocks real-people likenesses — keep it for non-people shots.
-  { endpointId: 'fal-ai/bytedance/seedance/v1.5/pro/image-to-video', label: 'Seedance 1.5 Pro · Image to Video (people)', capability: 'video', family: 'Seedance 1.5 Pro', task: 'Image to Video' },
-  { endpointId: 'fal-ai/bytedance/seedance/v1.5/pro/image-to-video', label: 'Seedance 1.5 Pro · Start+End (people)', capability: 'video', twoFrame: true, family: 'Seedance 1.5 Pro', task: 'Start + End' },
-  { endpointId: 'bytedance/seedance-2.0/image-to-video', label: 'Seedance 2.0 · Image to Video', capability: 'video', family: 'Seedance 2.0', task: 'Image to Video' },
-  { endpointId: 'bytedance/seedance-2.0/image-to-video', label: 'Seedance 2.0 · Start+End', capability: 'video', twoFrame: true, family: 'Seedance 2.0', task: 'Start + End' },
-  // Reference-to-video — weave several named board references (images + video
-  // clips) into one shot; the prompt is adapted to @Image1 / @Video1 tokens.
-  // The consistency workhorse for character/prop/style continuity.
-  { endpointId: 'bytedance/seedance-2.0/reference-to-video', label: 'Seedance 2.0 · References to Video', capability: 'video', family: 'Seedance 2.0', task: 'References to Video' },
-  { endpointId: 'bytedance/seedance-2.0/fast/reference-to-video', label: 'Seedance 2.0 Fast · References to Video', capability: 'video', family: 'Seedance 2.0', task: 'References to Video · Fast' },
-  // Veo 3.1 reference-to-video — blends reference images ("ingredients"), images only.
-  { endpointId: 'fal-ai/veo3.1/reference-to-video', label: 'Veo 3.1 · References to Video', capability: 'video', family: 'Veo 3.1', task: 'References to Video' },
-  { endpointId: 'fal-ai/veo3.1/fast/reference-to-video', label: 'Veo 3.1 Fast · References to Video', capability: 'video', family: 'Veo 3.1', task: 'References to Video · Fast' },
+const ENDPOINT_OVERRIDES: EndpointOverride[] = [
+  // Segmentation → cutout-on-board screen. The `-rle` twins return run-length
+  // encoding rather than an image, so they stay on the generic form.
+  {
+    match: /\/sam-\d|\bevf-sam\b/i,
+    whenCategory: 'image-to-image',
+    exclude: /-rle$/i,
+    apply: { capability: 'segment' },
+    task: 'Extract object',
+  },
+  // Equirectangular 360° output → photosphere embed. Not `image-to-world`,
+  // which is a 3D scene rather than a panorama.
+  {
+    match: /hunyuan_world|to-panorama/i,
+    whenCategory: 'image-to-image',
+    apply: { capability: 'panorama' },
+    task: 'Image to Panorama',
+  },
+  // Rig + animate a character → animated viewer embed. fal files these under
+  // `3d-to-3d`, which carries no hint that a rigging screen is wanted.
+  { match: /rigging/i, apply: { capability: 'rig' }, task: 'Rig + Animate' },
+  // The two FFmpeg merges this app has screens for. `merge-audios` is a third
+  // one with no screen, so it is deliberately not matched.
+  {
+    match: /ffmpeg-api\/(merge-videos|merge-audio-video)$/i,
+    apply: { capability: 'merge' },
+    task: 'Merge',
+  },
+  // Video → soundtrack. fal categorises these as `video-to-video` (they return
+  // the same video with audio muxed in), so without this they land on the
+  // video form and ask for a video URL instead of offering the board's video
+  // embeds. The genuinely `video-to-audio` models need no override —
+  // FAL_CATEGORY_MAP already maps that category to `sound`.
+  {
+    match: /thinksound|mmaudio|foley/i,
+    whenCategory: 'video-to-video',
+    apply: { capability: 'sound' },
+    task: 'Video to Sound',
+  },
+  // Two stills in, one video out → the start/end screen rather than the
+  // single-image form. Every vendor names this differently: first-last-frame
+  // (Veo, Flux 3), start-end (Vidu), flf2v (Framepack, Wan), keyframes
+  // (Flux 3), transition (PixVerse), frame-interpolation (AMT). Gating on
+  // `image-to-video` is what excludes the LoRA trainers and the
+  // video-to-video interpolators that share those words.
+  {
+    match: /first-last|start-end|flf2v|keyframes-to-video|\/transition$|frame-interpolation/i,
+    whenCategory: 'image-to-video',
+    apply: { capability: 'video', twoFrame: true },
+    task: 'First + Last',
+  },
+];
 
-  // ── Behind the flag (kept, not deleted) ────────────────────────────────
-  { endpointId: 'fal-ai/flux/dev', label: 'Flux.1 [dev] (text→image)', capability: 'image', experimental: true, generate: true, family: 'FLUX.1', task: 'Generate (dev)' },
-  { endpointId: 'fal-ai/flux-1/dev/image-to-image', label: 'Flux.1 [dev] image-to-image', capability: 'image', experimental: true, family: 'FLUX.1', task: 'Image to Image' },
-  { endpointId: 'fal-ai/flux-general', label: 'Flux General (ControlNet / IP-Adapter)', capability: 'image', experimental: true, generate: true, family: 'FLUX.1', task: 'ControlNet / IP-Adapter' },
-  { endpointId: 'fal-ai/gemini-tts', label: 'Gemini TTS', capability: 'audio', experimental: true, family: 'Gemini TTS', task: 'Text to Speech' },
-  { endpointId: 'fal-ai/evf-sam', label: 'EVF-SAM · Text cutout', capability: 'segment', experimental: true, family: 'EVF-SAM', task: 'Text cutout' },
+/**
+ * Extra UI variants for an endpoint fal lists exactly once.
+ *
+ * Some video endpoints accept either one image or a start+end pair — same
+ * endpoint, two different screens. That is a property of this app's UI, not
+ * of the model, so fal's catalog has no field for it. Each entry here adds a
+ * second browsable task for an endpoint, and only if the sync actually
+ * returned that endpoint.
+ */
+const EXTRA_TASKS: Array<{ match: RegExp; task: string; apply: Partial<FalModel> }> = [
+  { match: /seedance.*\/image-to-video$/i, task: 'Start + End', apply: { twoFrame: true } },
 ];
 
 // ---------------------------------------------------------------------------
@@ -170,12 +197,14 @@ let activeFilter: CatalogFilter = DEFAULT_CATALOG_FILTER;
 const catalogListeners = new Set<() => void>();
 
 // Cache of the last successful catalog sync (see mergeSyncedCatalog below) —
-// read synchronously at module init so a *returning* user sees the full
-// catalog immediately instead of just the ~40-entry hand list while
-// api.getModels() re-fetches in the background (App.tsx). Only the first-ever
-// load per browser (no cache yet) falls back to the hand list. No staleness
-// check: even a week-old cache is a fine instant placeholder, since the
-// background refresh always overwrites it within seconds anyway.
+// read synchronously at module init so a *returning* user sees the catalog
+// immediately while api.getModels() re-fetches in the background (App.tsx).
+// With no hand-maintained fallback list, this cache is the only thing between
+// a returning user and an empty screen, so it matters more than it used to.
+// The first-ever load per browser has nothing cached and shows App's loading
+// screen until the sync lands. No staleness check: even a week-old cache is a
+// fine instant placeholder, since the background refresh always overwrites it
+// within seconds anyway.
 const CATALOG_CACHE_KEY = 'fal:catalogCache';
 
 function readCachedSyncedModels(): SyncedMeta[] | null {
@@ -197,13 +226,12 @@ export function cacheSyncedModels(models: SyncedMeta[]): void {
   }
 }
 
-// The live model set. Defaults to the hand list; a cached sync from a
-// previous session (if any) is merged in further down this file, once
-// mergeSyncedCatalog and what it depends on are actually defined — calling
-// it up here, before those `const`s below have run, would throw (temporal
-// dead zone). Replaced again once a fresh sync completes. Browse helpers
-// read this.
-let activeModels: FalModel[] = FAL_MODELS;
+// The live model set. Starts empty — there is no built-in list any more — and
+// is filled either from a cached sync (applied further down this file, once
+// mergeSyncedCatalog and what it depends on are defined; calling it up here
+// would hit the temporal dead zone) or by the first successful sync. Browse
+// helpers read this.
+let activeModels: FalModel[] = [];
 export function setActiveModels(models: FalModel[]): void {
   activeModels = models;
   catalogListeners.forEach((l) => l());
@@ -211,9 +239,9 @@ export function setActiveModels(models: FalModel[]): void {
 
 // Whether the browsable catalog is settled — either a cached sync was applied
 // at init, or the first real sync attempt (success or failure) has completed.
-// Drives App.tsx's loading screen: showing the ~40-entry hand list on its own
-// before the long tail arrives just reads as a broken/incomplete list, so a
-// first-ever-load user sees a loading state instead until this flips true.
+// Drives App.tsx's loading screen: with no built-in list there is nothing to
+// show before the sync lands, so a first-ever-load user sees a loading state
+// until this flips true.
 let catalogReady = false;
 export function isCatalogReady(): boolean {
   return catalogReady;
@@ -239,9 +267,9 @@ export function subscribeCatalog(cb: () => void): () => void {
   };
 }
 
-/** Models shown in the UI — hides experimental ones + applies the curation filter. */
+/** Models shown in the UI — the synced catalog with the curation filter applied. */
 export function enabledModels(): FalModel[] {
-  let list = SHOW_EXPERIMENTAL ? activeModels : activeModels.filter((m) => !m.experimental);
+  let list: FalModel[] = activeModels;
   if (activeFilter.providers) {
     const allow = new Set(activeFilter.providers);
     list = list.filter((m) => allow.has(providerOf(m.endpointId)));
@@ -257,12 +285,12 @@ export function enabledModels(): FalModel[] {
  *  the toggle universe for the Settings page. */
 export function allProviders(): string[] {
   const set = new Set<string>();
-  const base = SHOW_EXPERIMENTAL ? activeModels : activeModels.filter((m) => !m.experimental);
+  const base = activeModels;
   for (const m of base) set.add(providerOf(m.endpointId));
   return [...set].sort();
 }
 export function allCategories(): string[] {
-  const base = SHOW_EXPERIMENTAL ? activeModels : activeModels.filter((m) => !m.experimental);
+  const base = activeModels;
   const present = new Set(base.map((m) => categoryOf(m)));
   // Known categories first (in display order), then any extras alphabetically.
   const known = CATEGORY_ORDER.filter((c) => present.has(c));
@@ -275,8 +303,8 @@ export function modelsByCapability(capability: Capability): FalModel[] {
 }
 
 export function findModel(endpointId: string): FalModel | undefined {
-  // Search the live (hand + synced) catalog, not just the hand list — a
-  // settings card can reference a long-tail synced model.
+  // Search the whole synced catalog, not just what the current curation
+  // filter shows — a settings card can reference a long-tail model.
   return activeModels.find((m) => m.endpointId === endpointId);
 }
 
@@ -522,7 +550,7 @@ export function toggleFavouriteState(key: string): boolean {
 /** Favourited families (bypasses the curation filter — a favourite always shows). */
 export function favouriteFamilies(): ModelFamily[] {
   if (favourites.size === 0) return [];
-  const base = SHOW_EXPERIMENTAL ? activeModels : activeModels.filter((m) => !m.experimental);
+  const base = activeModels;
   return familiesFrom(base).filter((f) => favourites.has(f.key));
 }
 
@@ -554,10 +582,10 @@ export function categoriesPresent(): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Synced catalog — merge fal's Models metadata over the hand list. Hand entries
-// win (they carry routing flags: generate / twoFrame / reference / family /
-// task). New models map their fal category → our capability + screen; the long
-// tail (audio, LLM, training…) routes to the generic screen.
+// Synced catalog — fal's Models metadata IS the catalog. Each model maps its
+// fal category → this app's capability + screen; the long tail (audio, LLM,
+// training…) routes to the generic schema screen. ENDPOINT_OVERRIDES near the
+// top of this file then corrects the few with a bespoke screen.
 // ---------------------------------------------------------------------------
 type CategoryMapping = { label: string; capability: Capability; generate?: boolean; screen?: 'generic' };
 
@@ -570,6 +598,10 @@ const FAL_CATEGORY_MAP: Record<string, CategoryMapping> = {
   'audio-to-video': { label: 'Audio to Video', capability: 'video' },
   'video-to-audio': { label: 'Video to Audio', capability: 'sound' },
   'image-to-3d': { label: 'Image to 3D', capability: 'model3d' },
+  // Remesh / retexture / part-splitting, plus Meshy's rigging (rescued by an
+  // override above). Without this they fall to the default mapping and show up
+  // as an image model called "3d To 3d".
+  '3d-to-3d': { label: '3D to 3D', capability: 'model3d', screen: 'generic' },
   'text-to-3d': { label: 'Text to 3D', capability: 'model3d', generate: true, screen: 'generic' },
   'text-to-audio': { label: 'Text to Audio', capability: 'music', generate: true, screen: 'generic' },
   'text-to-speech': { label: 'Text to Speech', capability: 'audio', generate: true, screen: 'generic' },
@@ -601,27 +633,54 @@ export type SyncedMeta = {
   thumbnailUrl: string | null;
 };
 
-/** Merge fal metadata over the hand catalog → the full model list. */
+/**
+ * Turn fal's synced metadata into the browsable catalog.
+ *
+ * This is the whole catalog — there is no hand list to merge over any more.
+ * Each entry's capability/screen comes from fal's own `category`, then
+ * ENDPOINT_OVERRIDES corrects the handful that need a bespoke screen, and
+ * EXTRA_TASKS adds the second UI variant for endpoints that have one.
+ */
 export function mergeSyncedCatalog(meta: SyncedMeta[]): FalModel[] {
-  const out: FalModel[] = [...FAL_MODELS];
-  const seen = new Set(FAL_MODELS.map((m) => m.endpointId));
+  const out: FalModel[] = [];
+  const seen = new Set<string>();
   for (const m of meta) {
     if (!m.endpointId || seen.has(m.endpointId)) continue;
     if (m.status && m.status !== 'active') continue;
     seen.add(m.endpointId);
-    const mapped = mapFalCategory((m.category ?? '').toLowerCase());
-    out.push({
+
+    const falCategory = (m.category ?? '').toLowerCase();
+    const mapped = mapFalCategory(falCategory);
+    const name = m.displayName?.trim() || m.endpointId;
+    const base: FalModel = {
       endpointId: m.endpointId,
-      label: m.displayName?.trim() || m.endpointId,
+      label: name,
       capability: mapped.capability,
       category: mapped.label,
-      family: m.displayName?.trim() || m.endpointId,
+      family: name,
       task: mapped.label,
-      synced: true,
       ...(mapped.generate ? { generate: true } : {}),
       ...(mapped.screen ? { screen: mapped.screen } : {}),
       ...(m.thumbnailUrl ? { thumbnailUrl: m.thumbnailUrl } : {}),
-    });
+    };
+
+    // A bespoke screen wins over the category-derived default, and clears
+    // both `screen: 'generic'` (that flag routes the long tail into the
+    // generic form, which is exactly what an override opts out of) and
+    // `category` (so categoryOf derives it from the new capability — see the
+    // note on ENDPOINT_OVERRIDES).
+    for (const o of ENDPOINT_OVERRIDES) {
+      if (!o.match.test(m.endpointId)) continue;
+      if (o.whenCategory && o.whenCategory !== falCategory) continue;
+      if (o.exclude?.test(m.endpointId)) continue;
+      Object.assign(base, o.apply, { screen: undefined, category: undefined, task: o.task ?? base.task });
+    }
+    out.push(base);
+
+    for (const extra of EXTRA_TASKS) {
+      if (!extra.match.test(m.endpointId)) continue;
+      out.push({ ...base, ...extra.apply, task: extra.task, label: `${name} · ${extra.task}` });
+    }
   }
   return out;
 }
@@ -629,9 +688,8 @@ export function mergeSyncedCatalog(meta: SyncedMeta[]): FalModel[] {
 // Apply a cached sync from a previous session now that mergeSyncedCatalog
 // (and FAL_CATEGORY_MAP/mapFalCategory, which it depends on) are actually
 // defined — see the `activeModels` comment near the top of this file for why
-// this can't happen any earlier. No-op (stays on the hand list) on the
-// first-ever load, when there's nothing cached yet — App.tsx's loading screen
-// covers that gap instead.
+// this can't happen any earlier. No-op on the first-ever load, when there's
+// nothing cached yet — App.tsx's loading screen covers that gap instead.
 {
   const cachedSyncedModels = readCachedSyncedModels();
   if (cachedSyncedModels) {
