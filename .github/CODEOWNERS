@@ -1,0 +1,19 @@
+# The hull.
+#
+# Compartments (apps/, agents/, screens/) are meant to be changed freely — that
+# is the whole point of keeping them sealed. These paths are different: they
+# have high fan-in, so a change here reaches every compartment at once. They get
+# a look before merge.
+#
+# See CONTRIBUTING.md, "Duplicate behaviour, share contracts".
+
+/frontend/src/shared/       @CharlieWinters
+/frontend/src/lib/          @CharlieWinters
+/backend/src/lib/           @CharlieWinters
+
+# Boundaries, licensing and supply chain.
+/.github/                   @CharlieWinters
+/frontend/.dependency-cruiser.cjs  @CharlieWinters
+/LICENSE                    @CharlieWinters
+/NOTICE                     @CharlieWinters
+/SECURITY.md                @CharlieWinters

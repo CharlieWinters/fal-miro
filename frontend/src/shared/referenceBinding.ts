@@ -4,7 +4,7 @@
 // binding — references are positional (order of `image_urls`), with two models
 // offering numbered tokens. This layer orders the images by first mention of
 // their title in the prompt, then adapts the prompt per model so the ordering
-// is unambiguous. See REFERENCE-TAGGING-INVESTIGATION.md.
+// is unambiguous. See docs/REFERENCE-TAGGING-INVESTIGATION.md.
 
 export type Ref = { url: string; title?: string };
 export type BindingResult = { urls: string[]; prompt: string };

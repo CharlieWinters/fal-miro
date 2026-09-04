@@ -42,9 +42,47 @@ export type ActiveJob = {
   kind: JobKind;
   createdAt: number;
   settings: GenSettings;
+  /** Set when this job is one step of a pipeline app run (see pipelineRunner.ts)
+   *  — resume_jobs uses these to hand off to advancePipelineForJob instead of
+   *  its normal single-model finalize. */
+  pipelineRunId?: string;
+  stepIndex?: number;
+};
+
+// ---------------------------------------------------------------------------
+// Pipeline runs — multi-model "app" pipelines (see shared/pipelineApps.ts +
+// shared/pipelineRunner.ts). Persisted the same way as active jobs (board
+// appData, so a run survives a closed/reopened board and is visible to every
+// collaborator on the board, not just the person who started it).
+// ---------------------------------------------------------------------------
+export type PipelineStepStatus = 'pending' | 'running' | 'done' | 'failed';
+
+export type PipelineStepState = {
+  endpointId: string;
+  status: PipelineStepStatus;
+  requestId?: string;
+  outputUrl?: string;
+  /** The board item holding this step's result — only set when the app lays
+   *  results out on the board (see PipelineRun.boardLayout). */
+  outputItemId?: string;
+};
+
+export type PipelineRun = {
+  id: string;
+  /** Key into PIPELINE_APPS (shared/pipelineApps.ts). */
+  appId: string;
+  /** Per-app choice: does this app place its steps' outputs on the board, or
+   *  keep everything inside its own panel screen? */
+  boardLayout: boolean;
+  /** The run's fixed (non-chained) inputs — e.g. the images a user picked. */
+  fixedInputs: Record<string, unknown>;
+  steps: PipelineStepState[];
+  currentStep: number;
+  createdAt: number;
 };
 
 const ACTIVE_JOBS_KEY = 'fal:activeJobs';
+const PIPELINE_RUNS_KEY = 'fal:pipelineRuns';
 const ITEM_META_NS = 'fal';
 
 // Short-lived cache over board appData. The burst of config reads on open (jobs,
@@ -126,6 +164,57 @@ export async function addActiveJob(job: ActiveJob): Promise<void> {
 export async function removeActiveJob(requestId: string): Promise<void> {
   const jobs = (await getActiveJobs()).filter((j) => j.requestId !== requestId);
   await saveActiveJobs(jobs);
+}
+
+export async function getPipelineRuns(): Promise<PipelineRun[]> {
+  try {
+    const all = await readAppData();
+    const runs = all?.[PIPELINE_RUNS_KEY];
+    return Array.isArray(runs) ? (runs as PipelineRun[]) : [];
+  } catch (e) {
+    console.warn('[storage] getPipelineRuns failed:', e);
+    return [];
+  }
+}
+
+export async function savePipelineRuns(runs: PipelineRun[]): Promise<void> {
+  // Trim to the most recent 10, and slim fixedInputs the same way active-job
+  // settings are slimmed (board images arrive as base64 data URIs). Step
+  // outputUrls are never slimmed — they're ordinary hosted Fal URLs, and the
+  // next step needs the real value, not a truncated marker.
+  const slim = runs.slice(-10).map((r) => ({
+    ...r,
+    fixedInputs: Object.fromEntries(Object.entries(r.fixedInputs).map(([k, v]) => [k, slimValue(v)])),
+  }));
+  const payload = stripUndefined(slim) as Parameters<typeof miro.board.setAppData>[1];
+  await writeAppData(PIPELINE_RUNS_KEY, payload);
+}
+
+export async function addPipelineRun(run: PipelineRun): Promise<void> {
+  const runs = await getPipelineRuns();
+  runs.push(run);
+  await savePipelineRuns(runs);
+}
+
+export async function updatePipelineRun(id: string, patch: Partial<PipelineRun>): Promise<PipelineRun | undefined> {
+  const runs = await getPipelineRuns();
+  const idx = runs.findIndex((r) => r.id === id);
+  if (idx === -1) return undefined;
+  runs[idx] = { ...runs[idx], ...patch };
+  await savePipelineRuns(runs);
+  return runs[idx];
+}
+
+/** Find the pipeline run (if any) whose step is currently tracking `requestId`. */
+export async function findPipelineRunByRequestId(
+  requestId: string,
+): Promise<{ run: PipelineRun; stepIndex: number } | undefined> {
+  const runs = await getPipelineRuns();
+  for (const run of runs) {
+    const stepIndex = run.steps.findIndex((s) => s.requestId === requestId);
+    if (stepIndex !== -1) return { run, stepIndex };
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

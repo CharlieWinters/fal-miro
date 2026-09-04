@@ -15,20 +15,6 @@ export type Bindings = {
   ALLOWED_ORIGINS?: string;
   FAL_PLATFORM_API_BASE?: string;
   DEBUG?: string;
-  // Miro OAuth (authorization-code flow) — lets the backend read Doc-format
-  // item content via the REST API, the one thing the Web SDK can't do. See
-  // lib/miroOauth.ts. Client id/secret come from the app's entry in Miro's
-  // "Your apps" dashboard; the redirect URI must exactly match what's
-  // registered there.
-  MIRO_CLIENT_ID?: string;
-  MIRO_CLIENT_SECRET?: string;
-  MIRO_REDIRECT_URI?: string;
-  // Optional Workers KV binding for OAuth token storage (see wrangler.toml).
-  // Falls back to an in-memory store when absent — fine for local/self-hosted
-  // use, lost on restart. Not read through ResolvedEnv below since it's a
-  // binding object, not a plain config value; lib/miroOauth.ts reads it
-  // directly via hono/adapter's env().
-  MIRO_TOKENS?: KVNamespace;
 };
 
 export type AppEnv = { Bindings: Bindings };
@@ -40,9 +26,6 @@ export type ResolvedEnv = {
   allowedOrigins: string[];
   falPlatformApiBase: string;
   debug: boolean;
-  miroClientId?: string;
-  miroClientSecret?: string;
-  miroRedirectUri?: string;
 };
 
 /**
@@ -54,7 +37,9 @@ export type ResolvedEnv = {
  */
 export function resolveEnv(c: Context<AppEnv>): ResolvedEnv {
   const e = env<Bindings>(c);
-  const debugRaw = e.DEBUG ?? '1';
+  // Off unless asked for. Debug logging summarizes every generation's input,
+  // which is not something a fresh deployment should be doing by default.
+  const debugRaw = e.DEBUG ?? '0';
   return {
     falKey: e.FAL_KEY,
     adminKey: e.ADMIN_KEY,
@@ -65,8 +50,5 @@ export function resolveEnv(c: Context<AppEnv>): ResolvedEnv {
       .filter(Boolean),
     falPlatformApiBase: e.FAL_PLATFORM_API_BASE ?? 'https://api.fal.ai/v1',
     debug: debugRaw !== '0' && debugRaw !== 'false',
-    miroClientId: e.MIRO_CLIENT_ID,
-    miroClientSecret: e.MIRO_CLIENT_SECRET,
-    miroRedirectUri: e.MIRO_REDIRECT_URI,
   };
 }

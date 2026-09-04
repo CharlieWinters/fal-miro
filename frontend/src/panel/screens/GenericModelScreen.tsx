@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { startAgentJob } from '../communication';
 import { SchemaForm } from '../SchemaForm';
-import { api, unwrapVideoEmbedUrl } from '../../lib/api';
+import { api } from '../../lib/api';
 import { connectItemsToCard, createCardBelow, resolveBoardItems } from '../../shared/boardHelpers';
 import {
   RECIPE_CARD_VERSION,
@@ -14,15 +14,16 @@ import { COMMON_ARGS, type FalModel } from '../../shared/falCatalog';
 import {
   parseFalInputSchema,
   defaultsFor,
+  pickPromptField,
   pickReferenceField,
   pickVideoReferenceField,
   type Field,
 } from '../../shared/schema';
-import { useBoardReferences, useFirstSelected, useSelectedStickyText } from '../hooks/boardInputs';
-import { ModelMetaChips } from '../ModelMetaChips';
+import { BasketPanel } from '../Basket';
+import { PromptBasket, assemblePrompt } from '../PromptBasket';
+import { useBasket } from '../hooks/basket';
+import { useBoardSelection } from '../hooks/boardSelection';
 
-type ImageItem = { id: string; title?: string };
-type EmbedItem = { id: string; url?: string; title?: string };
 
 type SchemaState =
   | { status: 'loading' }
@@ -39,42 +40,35 @@ const PROMPT_FALLBACK: Field[] = [{ name: 'prompt', label: 'Prompt', kind: 'text
  */
 export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: RecipeSeed | null }) {
   const [schema, setSchema] = useState<SchemaState>({ status: 'loading' });
-  const [meta, setMeta] = useState<Record<string, unknown> | null>(null);
   const [values, setValues] = useState<Record<string, unknown>>({});
-  const [editedPrompt, setEditedPrompt] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
-  const sourceImage = useFirstSelected<ImageItem>('image');
-  const rawSourceVideo = useFirstSelected<EmbedItem>('embed');
-  const boardRefs = useBoardReferences();
-  const sticky = useSelectedStickyText();
+  // Reference baskets — ordered lists the user builds. Nothing mirrors the
+  // selection, so clicking around the board costs no SDK calls.
+  const boardSel = useBoardSelection();
+  const imageBasket = useBasket('image', boardSel);
+  const videoBasket = useBasket('video', boardSel);
+  const noteBasket = useBasket('note', boardSel);
+  const [promptText, setPromptText] = useState('');
+  const fullPrompt = assemblePrompt(noteBasket, promptText);
 
-  // A reopened settings card's connected ids — fallback source until the user
-  // selects something directly on the board themselves.
-  const [seedRefs, setSeedRefs] = useState<{
-    images: Array<{ id: string; title?: string }>;
-    videos: Array<{ id: string; title?: string }>;
-  } | null>(null);
+  // Reopening a settings card pre-fills the baskets and stops there — no
+  // separate "from this card" state to reason about.
   useEffect(() => {
     if (!seed) return;
-    setSeedRefs({ images: seed.images, videos: seed.videos });
+    imageBasket.replace(seed.images);
+    videoBasket.replace(seed.videos);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.token]);
-  useEffect(() => {
-    if (sourceImage || rawSourceVideo || boardRefs.images.length || boardRefs.videos.length || sticky.text) {
-      setSeedRefs(null);
-    }
-  }, [sourceImage, rawSourceVideo, boardRefs.images.length, boardRefs.videos.length, sticky.text]);
 
   useEffect(() => {
     let mounted = true;
     setSchema({ status: 'loading' });
-    setEditedPrompt(false);
     api
       .getSchema(model.endpointId)
       .then((res) => {
         if (!mounted) return;
         const fields = parseFalInputSchema(res.openapi);
-        setMeta(res.metadata ?? null);
         if (fields.length === 0) {
           setSchema({ status: 'fallback', fields: PROMPT_FALLBACK, error: 'Schema had no inputs.' });
           setValues({});
@@ -85,7 +79,6 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
       })
       .catch((err) => {
         if (!mounted) return;
-        setMeta(null);
         setSchema({ status: 'fallback', fields: PROMPT_FALLBACK, error: String(err?.message ?? err) });
         setValues({});
       });
@@ -95,45 +88,21 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
   }, [model.endpointId]);
 
   const fields = schema.status === 'loading' ? [] : schema.fields;
-  const promptField = useMemo(() => fields.find((f) => f.name === 'prompt'), [fields]);
+  const promptField = useMemo(() => pickPromptField(fields), [fields]);
   const referenceField = useMemo(() => pickReferenceField(fields), [fields]);
   const videoReferenceField = useMemo(() => pickVideoReferenceField(fields), [fields]);
   const multiImage = Boolean(referenceField?.multiple);
   const multiVideo = Boolean(videoReferenceField?.multiple);
 
-  // Which board images feed the primary image field — live selection, falling
-  // back to a reopened recipe's connected ids.
-  const refImageIds = multiImage
-    ? boardRefs.images.length
-      ? boardRefs.images.map((i) => i.id)
-      : seedRefs?.images.map((i) => i.id) ?? []
-    : sourceImage
-      ? [sourceImage.id]
-      : seedRefs?.images[0]
-        ? [seedRefs.images[0].id]
-        : [];
+  // A single-value field sends the first basket item; the basket shows the rest.
+  const refImageIds = (multiImage ? imageBasket.items : imageBasket.items.slice(0, 1)).map((i) => i.id);
 
-  // A selected embed only counts as a video candidate when it's a Fal video.
-  const sourceVideo = useMemo(
-    () => (rawSourceVideo?.url && unwrapVideoEmbedUrl(rawSourceVideo.url) ? rawSourceVideo : null),
-    [rawSourceVideo],
-  );
-  // Which board videos feed the primary video field — same live-first fallback.
-  const refVideoIds = multiVideo
-    ? boardRefs.videos.length
-      ? boardRefs.videos.map((v) => v.id)
-      : seedRefs?.videos.map((v) => v.id) ?? []
-    : sourceVideo
-      ? [sourceVideo.id]
-      : seedRefs?.videos[0]
-        ? [seedRefs.videos[0].id]
-        : [];
+  const refVideoIds = (multiVideo ? videoBasket.items : videoBasket.items.slice(0, 1)).map((v) => v.id);
 
   // The frame the current references came from, if any — live selection wins,
   // else falls back to the reopened card's own frame. Lets the output place
   // below that frame, sized to match, instead of trailing one reference item.
-  const usingLiveRefs = Boolean(sourceImage || sourceVideo || boardRefs.images.length || boardRefs.videos.length);
-  const referenceFrameId = usingLiveRefs ? boardRefs.frameId : seed?.frameId ?? undefined;
+  const referenceFrameId = seed?.frameId ?? undefined;
 
   // Merge a fresh seed's static input over the schema defaults once they're
   // loaded, then apply any connected-sticky field overrides (e.g. a "Seed:
@@ -141,43 +110,54 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
   useEffect(() => {
     if (!seed || schema.status === 'loading') return;
     const overrides = resolveStickyFieldOverrides(seed.stickies, fields);
-    setValues((v) => ({ ...v, ...seed.input, ...overrides }));
+    const merged = { ...seed.input, ...overrides } as Record<string, unknown>;
+    if (promptField && typeof merged[promptField.name] === 'string') {
+      setPromptText(merged[promptField.name] as string);
+    }
+    setValues((v) => ({ ...v, ...merged }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.token, schema.status]);
 
-  // Seed the prompt from selected stickies until the user edits it.
-  useEffect(() => {
-    if (editedPrompt || !promptField) return;
-    if (sticky.text) setValues((v) => ({ ...v, prompt: sticky.text }));
-  }, [sticky.text, editedPrompt, promptField]);
+  /**
+   * Why Generate can't run yet, or null — drives both the disabled button and
+   * the message, so a missing required input shows before the click rather
+   * than only as an error after it. Same shape as ImageGenScreen's.
+   */
+  const blockReason: string | null = (() => {
+    if (imageBasket.hasMissing) return 'An image in the basket is no longer on the board — remove it first.';
+    if (videoBasket.hasMissing) return 'A video in the basket is no longer on the board — remove it first.';
+    if (noteBasket.hasMissing) return 'A sticky note in the prompt is no longer on the board — remove it first.';
+    if (referenceField?.required && refImageIds.length === 0) {
+      return `Add ${multiImage ? 'one or more images' : 'an image'} to the ${multiImage ? 'Images' : 'Image'} basket first — select on the board, then press Add.`;
+    }
+    if (videoReferenceField?.required && refVideoIds.length === 0) {
+      return `Add ${multiVideo ? 'one or more Fal videos' : 'a Fal video'} to the ${multiVideo ? 'Videos' : 'Video'} basket first — select on the board, then press Add.`;
+    }
+    if (promptField?.required && !fullPrompt.trim()) {
+      return 'Type a prompt, or add sticky notes to the prompt basket.';
+    }
+    return null;
+  })();
 
   const onChange = (name: string, value: unknown) => {
-    if (name === 'prompt') setEditedPrompt(true);
     setValues((v) => ({ ...v, [name]: value }));
   };
 
   const onGenerate = () => {
     setNote(null);
+    if (blockReason) {
+      setNote(blockReason);
+      return;
+    }
     let input: Record<string, unknown>;
     try {
       input = buildInput(fields, values);
+      // The prompt basket owns this field — SchemaForm no longer writes it.
+      if (promptField && fullPrompt.trim()) input[promptField.name] = fullPrompt;
     } catch (e) {
       setNote(e instanceof Error ? e.message : 'Invalid input.');
       return;
     }
-    if (referenceField?.required && refImageIds.length === 0 && !input[referenceField.name]) {
-      setNote(`Select ${multiImage ? 'one or more images' : 'an image'} on the board for this model.`);
-      return;
-    }
-    if (videoReferenceField?.required && refVideoIds.length === 0 && !input[videoReferenceField.name]) {
-      setNote(`Select ${multiVideo ? 'one or more Fal videos' : 'a Fal video'} on the board for this model.`);
-      return;
-    }
-    if (promptField?.required && !String(input.prompt ?? '').trim()) {
-      setNote('Type a prompt or select a sticky note first.');
-      return;
-    }
-
     startAgentJob({
       agentId: 'fal_generic',
       label: model.label,
@@ -185,7 +165,7 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
       payload: {
         endpointId: model.endpointId,
         input,
-        stickyId: sticky.anchorId,
+        stickyId: noteBasket.items[0]?.id,
         ...(referenceField && refImageIds.length
           ? { imageFields: [{ field: referenceField.name, itemIds: refImageIds, multiple: multiImage }] }
           : {}),
@@ -206,6 +186,8 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
     let input: Record<string, unknown>;
     try {
       input = buildInput(fields, values);
+      // The prompt basket owns this field — SchemaForm no longer writes it.
+      if (promptField && fullPrompt.trim()) input[promptField.name] = fullPrompt;
     } catch (e) {
       setNote(e instanceof Error ? e.message : 'Invalid input.');
       return;
@@ -221,7 +203,7 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
     };
 
     const connectIds = [...refImageIds, ...refVideoIds];
-    if (sticky.anchorId) connectIds.push(sticky.anchorId);
+    connectIds.push(...noteBasket.items.map((n) => n.id));
 
     // A selected frame's contents count as connected too.
     try {
@@ -259,7 +241,6 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
         <div className="sub">{model.endpointId}</div>
       </div>
 
-      <ModelMetaChips metadata={meta} />
 
       {schema.status === 'loading' && <div className="notice">Loading model schema…</div>}
 
@@ -270,34 +251,30 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
           )}
 
           {referenceField && (
-            <div className={`source-image ${refImageIds.length ? 'chosen' : ''}`}>
-              {refImageIds.length ? (
-                <>
-                  <span className="check">✓</span> {refImageIds.length} image{refImageIds.length === 1 ? '' : 's'} →{' '}
-                  <code>{referenceField.name}</code>
-                </>
-              ) : (
-                <>
-                  Select {multiImage ? 'one or more images' : 'an image'} on the board → <code>{referenceField.name}</code>
-                </>
-              )}
-            </div>
+            <BasketPanel
+              basket={imageBasket}
+              title={multiImage ? 'Image references' : 'Image'}
+              cap={multiImage ? undefined : 1}
+              onInsertToken={(t) => setPromptText((p) => (p && !/\s$/.test(p) ? `${p} ${t}` : p + t))}
+            />
           )}
 
           {videoReferenceField && (
-            <div className={`source-image ${refVideoIds.length ? 'chosen' : ''}`}>
-              {refVideoIds.length ? (
-                <>
-                  <span className="check">✓</span> {refVideoIds.length} video{refVideoIds.length === 1 ? '' : 's'} →{' '}
-                  <code>{videoReferenceField.name}</code>
-                </>
-              ) : (
-                <>
-                  Select {multiVideo ? 'one or more Fal videos' : 'a Fal video'} on the board →{' '}
-                  <code>{videoReferenceField.name}</code>
-                </>
-              )}
-            </div>
+            <BasketPanel
+              basket={videoBasket}
+              title={multiVideo ? 'Video references' : 'Video'}
+              cap={multiVideo ? undefined : 1}
+              onInsertToken={(t) => setPromptText((p) => (p && !/\s$/.test(p) ? `${p} ${t}` : p + t))}
+            />
+          )}
+
+          {promptField && (
+            <PromptBasket
+              basket={noteBasket}
+              text={promptText}
+              onTextChange={setPromptText}
+              counts={{ Image: imageBasket.items.length, Video: videoBasket.items.length, Audio: 0 }}
+            />
           )}
 
           <SchemaForm
@@ -308,27 +285,22 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
             hide={[
               ...(referenceField ? [referenceField.name] : []),
               ...(videoReferenceField ? [videoReferenceField.name] : []),
+              // A live mode renders the prompt itself, framed and read-only.
+              ...(promptField ? [promptField.name] : []),
             ]}
           />
-
-          {promptField && editedPrompt && (
-            <button
-              type="button"
-              className="reset-link"
-              onClick={() => {
-                setEditedPrompt(false);
-                setNote(null);
-              }}
-            >
-              ↻ Reset prompt to sticky
-            </button>
-          )}
 
           <div className="button-row">
             <button type="button" className="secondary" onClick={onSaveCard}>
               Save as settings card
             </button>
-            <button type="button" className="primary" onClick={onGenerate}>
+            <button
+              type="button"
+              className="primary"
+              onClick={onGenerate}
+              disabled={Boolean(blockReason)}
+              title={blockReason ?? undefined}
+            >
               Run model
             </button>
           </div>

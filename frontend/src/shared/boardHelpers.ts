@@ -1,7 +1,7 @@
 // Thin wrappers around the Miro Web SDK shared across agents. Adapted from the
 // Runway integration, trimmed to what the Fal image agent needs.
 
-import { api, unwrapVideoEmbedUrl, unwrapAudioEmbedUrl } from '../lib/api';
+import { unwrapVideoEmbedUrl, unwrapAudioEmbedUrl } from '../lib/api';
 
 export type MiroImageItem = {
   id: string;
@@ -24,10 +24,10 @@ const BOARD_QUERY_TTL_MS = 2000;
 /**
  * All items of `type`, or every item on the board if `type` is omitted.
  * The no-filter form matters for classifications the SDK invents itself
- * rather than a real underlying widget type (e.g. `'unsupported'`, what a
- * Doc-format item reports as — see `getDocumentText`) — filtering server-side
- * by a label that isn't a genuine type is unverified and risky, so callers
- * needing those fetch everything and filter client-side instead.
+ * rather than a real underlying widget type (e.g. `'unsupported'`) —
+ * filtering server-side by a label that isn't a genuine type is unverified
+ * and risky, so callers needing those fetch everything and filter
+ * client-side instead.
  */
 export async function cachedBoardGet(type?: string): Promise<unknown[]> {
   const key = type ?? '__all__';
@@ -76,10 +76,9 @@ export function makePlaceholderDataUrl(ratio: string, label = 'Generating…'): 
 }
 
 /**
- * Strip HTML tags from sticky-note/Doc content (Miro stores stickies as
- * `<p>…</p>`; Docs come back with full multi-paragraph/heading/list HTML —
- * see getDocumentText). `textContent` has no concept of block-level spacing,
- * so without inserting real newlines at block boundaries first, "...end of a
+ * Strip HTML tags from sticky-note content (Miro stores stickies as
+ * `<p>…</p>`). `textContent` has no concept of block-level spacing, so
+ * without inserting real newlines at block boundaries first, "...end of a
  * sentence.</p><p>Start of the next..." collapses into one run-on string
  * with nothing between them. Blank lines are dropped, not just collapsed —
  * "<p></p>" and the like shouldn't leave a bare newline behind.
@@ -108,39 +107,6 @@ export async function getStickyText(itemId: string): Promise<string> {
   } catch (e) {
     console.warn('[boardHelpers] getStickyText failed', e);
     return '';
-  }
-}
-
-/**
- * Read a Doc-format item's text content by id — the one thing the Web SDK
- * can't do itself, so this goes through the backend's Miro OAuth token (see
- * lib/api.ts's getDocumentContent, backend/src/lib/miroOauth.ts). `userId`
- * comes from `miro.board.getUserInfo()`; returns null if that Miro account
- * hasn't been connected yet (see Settings → "Connect Miro account"), or on
- * any other failure — callers treat a doc the same as a sticky with no text,
- * not a hard error.
- *
- * The Web SDK has no accessor for Doc-format items at all — confirmed live:
- * `board.getById`/`getSelection` return one as a bare geometry shell
- * (id/x/y/width/height/timestamps/parentId) tagged `type: 'unsupported'`,
- * indistinguishable from any other item type the SDK doesn't have a class
- * for. So the frontend can't gate on type; this treats every `unsupported`
- * item as a *candidate* and lets the REST call (which reports the real
- * `doc_format` type) be the actual answer — a non-Doc `unsupported` item
- * just 404s and falls into the catch below like any other miss. Content
- * comes back as HTML (`data.content`), stripped the same way sticky-note
- * content is.
- */
-export async function getDocumentText(itemId: string, userId: string): Promise<string | null> {
-  try {
-    const item = (await miro.board.getById(itemId)) as { type?: string } | null;
-    if (!item || item.type !== 'unsupported') return null;
-    const board = await miro.board.getInfo();
-    const { content } = await api.getDocumentContent(board.id, itemId, userId);
-    return content ? stripHtml(content) : content;
-  } catch (e) {
-    console.warn('[boardHelpers] getDocumentText failed', e);
-    return null;
   }
 }
 
@@ -438,6 +404,39 @@ export async function getImageUrl(itemId: string): Promise<string | null> {
     return item.url ?? null;
   } catch (e) {
     console.warn('[boardHelpers] getImageUrl failed', e);
+    return null;
+  }
+}
+
+/**
+ * A URL safe to read PIXELS from — the mirror image of `getImageUrl`.
+ *
+ * `getImageUrl` prefers the hosted fal.media URL because its callers send it
+ * *to Fal*, where a URL beats a multi-MB base64 body. Local pixel work wants
+ * the exact opposite: a cross-origin image taints the canvas (or, with
+ * `crossOrigin="anonymous"` and no `Access-Control-Allow-Origin` from that
+ * host, refuses to load at all), so `getDataUrl()`'s `data:` URI — same-origin
+ * by definition — comes first here. That keeps canvas apps like Pattern Fill
+ * working with no backend at all, instead of bouncing off `/proxy`.
+ */
+export async function getImagePixelRef(
+  itemId: string,
+): Promise<{ miroImageId: string; url: string; title?: string } | null> {
+  try {
+    const item = (await miro.board.getById(itemId)) as MiroImageItem;
+    if (!item) return null;
+    const title = (item.title ?? '').trim() || undefined;
+    if (typeof item.getDataUrl === 'function') {
+      try {
+        const dataUrl = await item.getDataUrl();
+        if (dataUrl) return { miroImageId: itemId, url: dataUrl, title };
+      } catch (e) {
+        console.warn('[boardHelpers] getDataUrl failed, falling back to the hosted URL', e);
+      }
+    }
+    return item.url ? { miroImageId: itemId, url: item.url, title } : null;
+  } catch (e) {
+    console.warn('[boardHelpers] getImagePixelRef failed', e);
     return null;
   }
 }

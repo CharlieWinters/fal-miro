@@ -9,9 +9,3 @@ ADMIN_KEY=
 # Any random string — required. The frontend sends it back as the
 # x-fal-proxy-key header; without a match every /api/fal/* call is rejected.
 BACKEND_KEY=
-# Only needed for "Connect Miro account" (reading Doc-format item content).
-# From Miro's "Your apps" dashboard — register an OAuth redirect URI there
-# matching MIRO_REDIRECT_URI in wrangler.toml (or this same value for
-# `wrangler dev`, e.g. http://localhost:8787/oauth/callback).
-MIRO_CLIENT_ID=
-MIRO_CLIENT_SECRET=

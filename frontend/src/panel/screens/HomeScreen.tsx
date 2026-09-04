@@ -13,7 +13,6 @@ import {
   type ModelFamily,
 } from '../../shared/falCatalog';
 import { favouriteFamilies, isFavourite } from '../../shared/falCatalog';
-import { resolveTargets, useCasesPresent } from '../../shared/useCases';
 import { toggleFavourite } from '../favourites';
 import { SelectionTools } from '../SelectionTools';
 import { ProviderLogo } from '../ProviderLogo';
@@ -58,11 +57,10 @@ const CAPABILITY_VERB: Record<Capability, string> = {
   other: 'Run',
 };
 
-type Drill =
-  | { type: 'category'; value: string }
-  | { type: 'provider'; value: string }
-  | { type: 'usecase'; value: string }
-  | null;
+type Drill = { type: 'category'; value: string } | { type: 'provider'; value: string } | null;
+
+/** Which Browse tab is showing. Lives in App, not here — see HomeScreen's props. */
+export type BrowseMode = 'category' | 'provider' | 'apps';
 
 /** A "For your selection" capture-tool card — icon is its capability, in a
  *  tone-tinted chip (matching the design's context tools). */
@@ -115,28 +113,6 @@ function ModelRow({ model, onSelect }: { model: FalModel; onSelect: (m: FalModel
           {CAPABILITY_VERB[model.capability]} · {model.label}
         </div>
         <div className="card-sub">{model.endpointId}</div>
-      </div>
-    </div>
-  );
-}
-
-/** A use-case row in search results — opens the case (or its chooser). */
-function UseCaseRow({ label, tone, count, onOpen }: { label: string; tone: string; count: number; onOpen: () => void }) {
-  return (
-    <div
-      className="card"
-      role="button"
-      tabIndex={0}
-      title={label}
-      onClick={onOpen}
-      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onOpen()}
-    >
-      <span className="cap-dot" style={{ background: tone }} />
-      <div className="card-body">
-        <div className="card-title">{label}</div>
-        <div className="card-sub">
-          Use case · {count} model{count === 1 ? '' : 's'}
-        </div>
       </div>
     </div>
   );
@@ -201,6 +177,9 @@ export function HomeScreen({
   onOpenScene,
   onOpenSettings,
   onOpenRecipe,
+  onOpenApp,
+  browseMode,
+  onBrowseModeChange,
 }: {
   onSelectFamily: (familyKey: string) => void;
   onSelectModel: (m: FalModel) => void;
@@ -208,11 +187,18 @@ export function HomeScreen({
   onOpenScene: () => void;
   onOpenSettings: () => void;
   onOpenRecipe: (recipe: RecipeCard, cardId: string) => void;
+  /** Opens a bespoke pipeline-app screen (Browse ▸ Apps) by its pipelineApps.ts id. */
+  onOpenApp?: (appId: string) => void;
+  /** Which Browse tab is showing. Owned by App so it survives opening an app
+   *  and coming back — this screen unmounts entirely while an app is open, so
+   *  local state here would silently reset the user to Category. */
+  browseMode: BrowseMode;
+  onBrowseModeChange: (mode: BrowseMode) => void;
 }) {
   useCatalogVersion(); // re-render Browse when the curation filter changes
   const [query, setQuery] = useState('');
-  const [browseMode, setBrowseMode] = useState<'category' | 'provider' | 'usecase'>('category');
   const [drill, setDrill] = useState<Drill>(null);
+  const [appsNote, setAppsNote] = useState<string | null>(null);
 
   // Selection-aware capture tools — all of them load their source cross-origin
   // through the backend's /proxy route (Fal's CDN sends no CORS headers), so
@@ -268,22 +254,14 @@ export function HomeScreen({
     );
   }, [q, searching]);
 
-  const matchedUseCases = useMemo(() => {
-    if (!searching) return [];
-    return useCasesPresent().filter((uc) => uc.label.toLowerCase().includes(q));
-  }, [q, searching]);
-
   const drilledFamilies = useMemo(() => {
     if (drill?.type === 'category') return familiesByCategory(drill.value);
     if (drill?.type === 'provider') return familiesByProvider(drill.value);
     return [];
   }, [drill]);
 
-  // Use-case drill: resolve the use case to its candidate tasks.
-  const drilledUseCase = drill?.type === 'usecase' ? useCasesPresent().find((u) => u.id === drill.value) : undefined;
-  const drilledTargets = useMemo(() => (drilledUseCase ? resolveTargets(drilledUseCase) : []), [drilledUseCase]);
-  const drillTitle = drill ? (drill.type === 'usecase' ? drilledUseCase?.label ?? drill.value : drill.value) : '';
-  const drillCount = drill?.type === 'usecase' ? drilledTargets.length : drilledFamilies.length;
+  const drillTitle = drill?.value ?? '';
+  const drillCount = drilledFamilies.length;
 
   const hasSelectionZone =
     Boolean(selectedRecipe) ||
@@ -366,38 +344,16 @@ export function HomeScreen({
       {/* Search overlay — takes precedence over browse/drill. */}
       {searching ? (
         <>
-          {matchedUseCases.length > 0 && (
-            <>
-              <span className="label">Use cases</span>
-              {matchedUseCases.map((uc) => {
-                const targets = resolveTargets(uc);
-                const open = () => {
-                  if (targets.length === 1) {
-                    onSelectModel(targets[0]);
-                  } else {
-                    setQuery('');
-                    setDrill({ type: 'usecase', value: uc.id });
-                  }
-                };
-                return (
-                  <UseCaseRow key={uc.id} label={uc.label} tone={toneOf(uc.icon)} count={targets.length} onOpen={open} />
-                );
-              })}
-            </>
-          )}
-
           <span className="label">
             {results.length} model result{results.length === 1 ? '' : 's'}
           </span>
           {results.map((m) => (
             <ModelRow key={`${m.endpointId}·${m.task ?? m.label}`} model={m} onSelect={onSelectModel} />
           ))}
-          {results.length === 0 && matchedUseCases.length === 0 && (
-            <div className="notice">Nothing matches “{query}”.</div>
-          )}
+          {results.length === 0 && <div className="notice">Nothing matches “{query}”.</div>}
         </>
       ) : drill ? (
-        // Drill-down: families (category/provider) or candidate tasks (use case).
+        // Drill-down: families in this category/provider.
         <>
           <div className="drill-head">
             <button type="button" className="back-link" onClick={() => setDrill(null)}>
@@ -406,13 +362,9 @@ export function HomeScreen({
             <span className="drill-title">{drillTitle}</span>
             <span className="count-pill">{drillCount}</span>
           </div>
-          {drill.type === 'usecase'
-            ? drilledTargets.map((m) => (
-                <ModelRow key={`${m.endpointId}·${m.task ?? m.label}`} model={m} onSelect={onSelectModel} />
-              ))
-            : drilledFamilies.map((f) => (
-                <FamilyRow key={f.key} family={f} showProvider={drill.type === 'category'} onSelect={onSelectFamily} />
-              ))}
+          {drilledFamilies.map((f) => (
+            <FamilyRow key={f.key} family={f} showProvider={drill.type === 'category'} onSelect={onSelectFamily} />
+          ))}
         </>
       ) : (
         // Browse grid — by category or by provider, with favourites on top.
@@ -430,23 +382,23 @@ export function HomeScreen({
             <button
               type="button"
               className={browseMode === 'category' ? 'active' : ''}
-              onClick={() => setBrowseMode('category')}
+              onClick={() => onBrowseModeChange('category')}
             >
               Category
             </button>
             <button
               type="button"
               className={browseMode === 'provider' ? 'active' : ''}
-              onClick={() => setBrowseMode('provider')}
+              onClick={() => onBrowseModeChange('provider')}
             >
               Provider
             </button>
             <button
               type="button"
-              className={browseMode === 'usecase' ? 'active' : ''}
-              onClick={() => setBrowseMode('usecase')}
+              className={browseMode === 'apps' ? 'active' : ''}
+              onClick={() => onBrowseModeChange('apps')}
             >
-              Use case
+              Apps
             </button>
           </div>
 
@@ -500,35 +452,117 @@ export function HomeScreen({
                 );
               })}
 
-            {browseMode === 'usecase' &&
-              useCasesPresent().map((uc) => {
-                const targets = resolveTargets(uc);
-                const tone = toneOf(uc.icon);
-                const open = () =>
-                  targets.length === 1 ? onSelectModel(targets[0]) : setDrill({ type: 'usecase', value: uc.id });
-                return (
-                  <div
-                    key={uc.id}
-                    className="tile"
-                    role="button"
-                    tabIndex={0}
-                    onClick={open}
-                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && open()}
-                  >
-                    <span
-                      className="tile-icon"
-                      style={{ background: toneFill(tone), border: `1px solid ${toneOutline(tone)}` }}
-                    >
-                      <CapabilityIcon capability={uc.icon} color={tone} size={18} />
-                    </span>
-                    <span className="tile-label">{uc.label}</span>
-                    <span className="tile-count">
-                      {targets.length} model{targets.length === 1 ? '' : 's'}
-                    </span>
-                  </div>
-                );
-              })}
+            {browseMode === 'apps' && onOpenApp && (
+              <div
+                className="tile"
+                role="button"
+                tabIndex={0}
+                onClick={() => onOpenApp('sketch-to-tryon')}
+                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onOpenApp('sketch-to-tryon')}
+              >
+                <span
+                  className="tile-icon"
+                  style={{ background: toneFill(toneOf('image')), border: `1px solid ${toneOutline(toneOf('image'))}` }}
+                >
+                  <CapabilityIcon capability="image" color={toneOf('image')} size={18} />
+                </span>
+                <span className="tile-label">Sketch to Try-On</span>
+                <span className="tile-count">app · 2 steps</span>
+              </div>
+            )}
+
+            {browseMode === 'apps' && onOpenApp && (
+              <div
+                className="tile"
+                role="button"
+                tabIndex={0}
+                onClick={() => onOpenApp('mask-creator')}
+                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onOpenApp('mask-creator')}
+              >
+                <span
+                  className="tile-icon"
+                  style={{ background: toneFill(toneOf('segment')), border: `1px solid ${toneOutline(toneOf('segment'))}` }}
+                >
+                  <CapabilityIcon capability="segment" color={toneOf('segment')} size={18} />
+                </span>
+                <span className="tile-label">Create Mask</span>
+                <span className="tile-count">app · 1 step</span>
+              </div>
+            )}
+
+            {browseMode === 'apps' && onOpenApp && (
+              <div
+                className="tile"
+                role="button"
+                tabIndex={0}
+                onClick={() => onOpenApp('nano-banana-pattern')}
+                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onOpenApp('nano-banana-pattern')}
+              >
+                <span
+                  className="tile-icon"
+                  style={{ background: toneFill(toneOf('image')), border: `1px solid ${toneOutline(toneOf('image'))}` }}
+                >
+                  <CapabilityIcon capability="image" color={toneOf('image')} size={18} />
+                </span>
+                <span className="tile-label">Nano Banana Pattern</span>
+                <span className="tile-count">app · 1 step</span>
+              </div>
+            )}
+
+            {browseMode === 'apps' && onOpenApp && (
+              <div
+                className="tile"
+                role="button"
+                tabIndex={0}
+                onClick={() => onOpenApp('pattern-fill')}
+                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onOpenApp('pattern-fill')}
+              >
+                <span
+                  className="tile-icon"
+                  style={{ background: toneFill(toneOf('image')), border: `1px solid ${toneOutline(toneOf('image'))}` }}
+                >
+                  <CapabilityIcon capability="image" color={toneOf('image')} size={18} />
+                </span>
+                <span className="tile-label">Pattern Fill</span>
+                <span className="tile-count">app · no credits</span>
+              </div>
+            )}
+
+            {browseMode === 'apps' && (
+              <div
+                className="tile"
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  if (hasRigSelected && selectedEmbed) {
+                    setAppsNote(null);
+                    onOpenTool('rig-to-image', selectedEmbed.id);
+                  } else {
+                    setAppsNote('Select a rigged character (an animated 3D viewer) on the board first, then click this again.');
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' && e.key !== ' ') return;
+                  if (hasRigSelected && selectedEmbed) {
+                    setAppsNote(null);
+                    onOpenTool('rig-to-image', selectedEmbed.id);
+                  } else {
+                    setAppsNote('Select a rigged character (an animated 3D viewer) on the board first, then click this again.');
+                  }
+                }}
+              >
+                <span
+                  className="tile-icon"
+                  style={{ background: toneFill(toneOf('rig')), border: `1px solid ${toneOutline(toneOf('rig'))}` }}
+                >
+                  <CapabilityIcon capability="rig" color={toneOf('rig')} size={18} />
+                </span>
+                <span className="tile-label">Rig Viewer → Image</span>
+                <span className="tile-count">app · capture tool</span>
+              </div>
+            )}
           </div>
+          {browseMode === 'apps' && appsNote && <div className="notice">{appsNote}</div>}
         </>
       )}
 

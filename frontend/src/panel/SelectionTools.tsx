@@ -15,8 +15,10 @@ export function SelectionTools() {
 
   useEffect(() => {
     let mounted = true;
-    const apply = async () => {
-      const sel = (await miro.board.getSelection()) as Array<{ id: string }>;
+    // Takes the selection as an argument so the event path can pass
+    // `event.items` straight in — re-calling getSelection() on every click
+    // was one metered read per click for data the event already carried.
+    const apply = async (sel: Array<{ id: string }>) => {
       if (!mounted) return;
       setItems(sel.map((s) => ({ id: s.id })));
       setLineage(null);
@@ -31,8 +33,11 @@ export function SelectionTools() {
       }
       if (mounted) setTotal(found ? sum : null);
     };
-    void apply();
-    const handler = () => void apply();
+    void miro.board
+      .getSelection()
+      .then((sel) => apply(sel as Array<{ id: string }>))
+      .catch((e) => console.warn('[SelectionTools] initial getSelection failed:', e));
+    const handler = (event: { items: Array<{ id: string }> }) => void apply(event.items);
     miro.board.ui.on('selection:update', handler);
     return () => {
       mounted = false;

@@ -6,6 +6,11 @@ selected board content, and the result drops back onto the board. Reference
 images bind by name across models, video/3D/audio outputs become playable
 embeds, and generated items track their lineage back to their sources.
 
+> An independent, unofficial project. Not affiliated with, endorsed by, or
+> supported by Miro or fal.ai. "Miro" and "fal" and the provider names and
+> logos in the model picker belong to their respective owners — see
+> [NOTICE](NOTICE).
+
 ## Install
 
 **[Install "Fal for Miro" on your Miro team](https://miro.com/app-install/?response_type=code&client_id=3458764674362323749&redirect_uri=%2Fapp-install%2Fconfirm%2F)**
@@ -109,12 +114,21 @@ fal-miro/
     src/app.ts       Routes/logic, runtime-agnostic (/healthz, /api/fal/*, /proxy)
     src/node.ts      Node entrypoint (npm run dev / start)
     src/worker.ts    Cloudflare Workers entrypoint (npm run dev:worker / deploy:worker)
+  docs/              design notes and investigations, kept for the reasoning
   frontend/          Vite + React, three iframes (headless / panel / modal)
     embed-*.html     Static video/audio/3d/rig/panorama viewers — no backend needed
     src/shared/      falCatalog (model catalog + capabilities), messageTypes, storage
     src/lib/api.ts   Fal client — routes to your backend or straight to Fal,
                      depending on connection mode
+    src/apps/        one folder per pipeline app — sealed compartments
+    src/agents/      one folder per generation worker — sealed compartments
 ```
+
+The `apps/`, `agents/` and `screens/` folders are deliberately self-contained
+and deliberately repeat themselves; `shared/` and `lib/` are the parts that
+don't. A boundary linter enforces the split in CI.
+[CONTRIBUTING.md](CONTRIBUTING.md) explains why, and why the duplication is
+the point.
 
 See `ARCHITECTURE.md` for the three-iframe (headless / panel / modal) pattern
 in more detail.
@@ -129,7 +143,7 @@ cd backend
 cp .env.example .env        # then set FAL_KEY=...
 npm install
 npm run dev                 # http://localhost:8789
-npm run lint                 # tsc --noEmit (type-check)
+npm run typecheck           # tsc --noEmit
 ```
 
 Frontend:
@@ -139,7 +153,7 @@ cd frontend
 cp .env.example .env        # VITE_API_BASE_URL=http://localhost:8789, VITE_BACKEND_KEY=<your local BACKEND_KEY>
 npm install
 npm run dev                 # http://localhost:5175
-npm run lint                # tsc --noEmit (type-check)
+npm run lint                # type-check + boundary rules (see CONTRIBUTING.md)
 ```
 
 To load a local build in Miro, create an app, paste `app-manifest.yaml`, and
@@ -162,3 +176,21 @@ curl -X POST localhost:8789/api/fal/run \
 
 curl "localhost:8789/api/fal/status/<requestId>?endpointId=fal-ai/flux/dev"
 ```
+
+## Contributing
+
+Issues and pull requests welcome. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) first — the architecture is compartmented on
+purpose and the section on shared code will save you a rejected PR.
+
+Found a security issue? Please report it privately —
+see [SECURITY.md](SECURITY.md). If you're deploying this somewhere other people
+can reach, read that file's threat model first: `BACKEND_KEY` is a gate, not a
+secret.
+
+## Licence
+
+[MIT](LICENSE) © Sean Winters.
+
+Provider logos and the CDN-loaded viewer libraries are not covered by that
+licence — see [NOTICE](NOTICE).

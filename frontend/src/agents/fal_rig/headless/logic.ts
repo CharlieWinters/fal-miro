@@ -150,20 +150,35 @@ export async function run(payload: unknown, requestId = ''): Promise<RigResult> 
   if (final.status === 'SUCCEEDED' && primaryUrl) {
     const { width, height } = parseRatio(ratio, 720);
     const abs = await resolveAbsolutePosition(placeholderId);
-    const embedX = abs?.absoluteX ?? targetX;
-    const embedY = abs?.absoluteY ?? targetY;
+    const baseX = abs?.absoluteX ?? targetX;
+    const baseY = abs?.absoluteY ?? targetY;
 
     await deleteItem(placeholderId);
-    const embed = await createEmbedAtPosition({ url: rigEmbedUrl(primaryUrl), x: embedX, y: embedY, width, height });
-    // Stash the clip list (animate tool) + the rest-pose rig (manual poser).
-    if (animations.length) settings.animations = animations;
+
     const rest = extractRestPose(final.data);
     if (rest) settings.restPoseUrl = rest;
     const rigCost = await estimateCost(endpointId, 1);
     settings.costUSD = rigCost !== undefined || remeshCost !== undefined ? (rigCost ?? 0) + (remeshCost ?? 0) : undefined;
-    await setItemGenerationSettings(embed.id, settings);
+
+    // One embed per animation clip, laid out in a row — every clip is its own
+    // playable board item rather than one embed with a clip-switcher hidden
+    // inside the (backend-only) Rig Viewer tool.
+    const clips = animations.length ? animations : [{ name: 'Animation', url: primaryUrl }];
+    const gapX = 40;
+    let firstEmbedId = '';
+    for (let i = 0; i < clips.length; i++) {
+      const clip = clips[i];
+      const x = baseX + i * (width + gapX);
+      const embed = await createEmbedAtPosition({ url: rigEmbedUrl(clip.url), x, y: baseY, width, height });
+      if (i === 0) firstEmbedId = embed.id;
+      // Each embed's settings carry just its own clip (so reopening Rig
+      // Viewer / the manual poser on it shows only what's actually there),
+      // plus the shared cost/lineage/rest-pose info.
+      await setItemGenerationSettings(embed.id, { ...settings, animations: [clip] });
+    }
+
     await removeActiveJob(falRequestId);
-    return { requestId: falRequestId, embedItemId: embed.id, outputUrl: primaryUrl };
+    return { requestId: falRequestId, embedItemId: firstEmbedId, outputUrl: primaryUrl };
   }
 
   await replaceImageContent(placeholderId, makePlaceholderDataUrl(ratio, 'Failed'), `Fal · ${final.status}`, {

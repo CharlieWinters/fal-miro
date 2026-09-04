@@ -5,7 +5,11 @@ import { api } from '../../lib/api';
 import { COMMON_ARGS, isBlendReference, type FalModel } from '../../shared/falCatalog';
 import { parseFalInputSchema, defaultsFor, pickAudioReferenceField, type Field } from '../../shared/schema';
 import { bindSeedanceReferences } from '../../shared/referenceBinding';
-import { useBoardReferences, useSelectedStickyText } from '../hooks/boardInputs';
+
+import { PromptBasket, assemblePrompt } from '../PromptBasket';
+import { BasketPanel } from '../Basket';
+import { useBasket } from '../hooks/basket';
+import { useBoardSelection } from '../hooks/boardSelection';
 import {
   connectItemsToCard,
   createCardBelow,
@@ -45,26 +49,11 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
 
   const [schema, setSchema] = useState<SchemaState>({ status: 'loading' });
   const [values, setValues] = useState<Record<string, unknown>>({});
-  const [editedPrompt, setEditedPrompt] = useState(false);
-  const refs = useBoardReferences();
-  const sticky = useSelectedStickyText();
+  const boardSel = useBoardSelection();
+  const noteBasket = useBasket('note', boardSel);
+  const [promptText, setPromptText] = useState('');
+  const fullPrompt = assemblePrompt(noteBasket, promptText);
   const [note, setNote] = useState<string | null>(null);
-
-  // A reopened settings card's connected images/videos/audio — fallback
-  // source (titles included, so the @Image/@Video/@Audio legend still names
-  // them) until the user selects something directly on the board themselves.
-  const [seedRefs, setSeedRefs] = useState<{
-    images: Array<{ id: string; title?: string }>;
-    videos: Array<{ id: string; title?: string }>;
-    audios: Array<{ id: string; title?: string }>;
-  } | null>(null);
-  useEffect(() => {
-    if (!seed) return;
-    setSeedRefs({ images: seed.images, videos: seed.videos, audios: seed.audios });
-  }, [seed?.token]);
-  useEffect(() => {
-    if (refs.images.length || refs.videos.length || refs.audios.length || sticky.text) setSeedRefs(null);
-  }, [refs.images.length, refs.videos.length, refs.audios.length, sticky.text]);
 
   // Live schema → drives prompt / duration / resolution / aspect_ratio / audio.
   useEffect(() => {
@@ -94,7 +83,7 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
   }, [model.endpointId]);
 
   const fields = schema.status === 'loading' ? [] : schema.fields;
-  const prompt = typeof values.prompt === 'string' ? values.prompt : '';
+  const prompt = fullPrompt;
   // Schema-driven: only offer/collect audio references for models that
   // actually declare an audio field (e.g. Seedance 2.5's `audio_urls`) —
   // Veo and older Seedance versions don't, so this stays empty for them.
@@ -105,63 +94,38 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
   // loaded, then apply any connected-sticky field overrides (e.g. a "Prompt:
   // …" or "Duration: 8" sticky) — those win over the frozen input snapshot.
   useEffect(() => {
+    if (!seed) return;
+    imageBasket.replace(seed.images);
+    videoBasket.replace(seed.videos);
+    audioBasket.replace(seed.audios);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed?.token]);
+
+  useEffect(() => {
     if (!seed || schema.status === 'loading') return;
     const overrides = resolveStickyFieldOverrides(seed.stickies, fields);
     setValues((v) => ({ ...v, ...seed.input, ...overrides }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.token, schema.status]);
 
-  // Seed the prompt from selected stickies until the user edits it.
-  useEffect(() => {
-    if (editedPrompt) return;
-    if (sticky.text) setValues((v) => ({ ...v, prompt: sticky.text }));
-  }, [sticky.text, editedPrompt]);
+  // One binding per reference kind. Order is load-bearing here — chip order is
+  // token order — so each slot shows its items numbered with the @Image1 /
+  // @Video1 / @Audio1 token the prompt will address them by.
+  //
+  // No connector anchor: this screen has several references and no single
+  // subject to hang them off, so 'connected' honestly resolves to nothing
+  // rather than guessing which reference is the subject.
+  const imageBasket = useBasket('image', boardSel);
+  const videoBasket = useBasket('video', boardSel);
+  const audioBasket = useBasket('audio', boardSel);
 
-  // Enforce the caps (image order == token order for Seedance) — live
-  // selection first, falling back to a reopened recipe's connected ids.
-  const liveImages = useMemo(() => refs.images.slice(0, maxImages), [refs.images, maxImages]);
-  const images = useMemo<Array<{ id: string; title?: string }>>(
-    () => (liveImages.length ? liveImages : (seedRefs?.images ?? []).slice(0, maxImages)),
-    [liveImages, seedRefs, maxImages],
-  );
-  // Veo takes no video references.
-  const liveVideos = useMemo(
-    () => (blend ? [] : refs.videos.slice(0, SEEDANCE_MAX_VIDEOS)),
-    [refs.videos, blend],
-  );
-  const videos = useMemo<Array<{ id: string; title?: string }>>(
-    () =>
-      blend
-        ? []
-        : liveVideos.length
-          ? liveVideos
-          : (seedRefs?.videos ?? []).slice(0, SEEDANCE_MAX_VIDEOS),
-    [blend, liveVideos, seedRefs],
-  );
-  const liveAudios = useMemo(
-    () => (supportsAudio ? refs.audios.slice(0, SEEDANCE_MAX_AUDIO) : []),
-    [refs.audios, supportsAudio],
-  );
-  const audios = useMemo<Array<{ id: string; title?: string }>>(
-    () =>
-      supportsAudio
-        ? liveAudios.length
-          ? liveAudios
-          : (seedRefs?.audios ?? []).slice(0, SEEDANCE_MAX_AUDIO)
-        : [],
-    [supportsAudio, liveAudios, seedRefs],
-  );
-  const overflow =
-    refs.images.length > maxImages ||
-    (!blend && refs.videos.length > SEEDANCE_MAX_VIDEOS) ||
-    (supportsAudio && refs.audios.length > SEEDANCE_MAX_AUDIO);
-
-  // The frame the current references came from, if any — live selection
-  // (a selected frame, or items inside one) wins; falls back to the reopened
-  // card's own frame once its seed refs are in use. Lets the output place
-  // below that frame, sized to match, instead of trailing one reference item.
-  const usingLiveRefs = liveImages.length > 0 || liveVideos.length > 0 || liveAudios.length > 0;
-  const referenceFrameId = usingLiveRefs ? refs.frameId : seed?.frameId ?? undefined;
+  // Caps are applied here, at send time, rather than by refusing the add — the
+  // basket shows everything you put in it and warns when the tail won't fit.
+  const images = imageBasket.items.slice(0, maxImages);
+  const videos = blend ? [] : videoBasket.items.slice(0, SEEDANCE_MAX_VIDEOS);
+  const audios = supportsAudio ? audioBasket.items.slice(0, SEEDANCE_MAX_AUDIO) : [];
+  // Each basket warns about its own overflow, so nothing global is needed here.
+  const referenceFrameId = seed?.frameId ?? undefined;
 
   // Seedance only: preview the @token mapping + adapted prompt (item ids stand
   // in for urls — the agent re-binds with real urls in the same order).
@@ -171,31 +135,39 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
         ? null
         : bindSeedanceReferences({
             prompt,
-            images: images.map((i) => ({ url: i.id, title: i.title })),
-            videos: videos.map((v) => ({ url: v.id, title: v.title })),
-            audios: audios.map((a) => ({ url: a.id, title: a.title })),
+            images: images.map((i) => ({ url: i.id, title: i.label })),
+            videos: videos.map((v) => ({ url: v.id, title: v.label })),
+            audios: audios.map((a) => ({ url: a.id, title: a.label })),
           }),
     [blend, prompt, images, videos, audios],
   );
-  const titleFor = (id: string) =>
-    images.find((i) => i.id === id)?.title ?? videos.find((v) => v.id === id)?.title ?? audios.find((a) => a.id === id)?.title;
+
+  /**
+   * Why Generate can't run yet, or null — drives both the disabled button and
+   * the message. Same shape as the other two screens.
+   */
+  const blockReason: string | null = (() => {
+    if (imageBasket.hasMissing) return 'An image in the basket is no longer on the board — remove it first.';
+    if (videoBasket.hasMissing) return 'A video in the basket is no longer on the board — remove it first.';
+    if (audioBasket.hasMissing) return 'An audio clip in the basket is no longer on the board — remove it first.';
+    if (noteBasket.hasMissing) return 'A sticky note in the prompt is no longer on the board — remove it first.';
+    if (images.length === 0 && videos.length === 0 && audios.length === 0) {
+      return blend
+        ? 'Add reference images to the basket first — select on the board, then press Add.'
+        : 'Add references to a basket first — select on the board, then press Add.';
+    }
+    if (!prompt.trim()) {
+      return blend
+        ? 'Describe the shot — the references are blended into it.'
+        : 'Describe the shot. Name your references (by their board title) to place them.';
+    }
+    return null;
+  })();
 
   const onGenerate = () => {
     setNote(null);
-    if (images.length === 0 && videos.length === 0 && audios.length === 0) {
-      setNote(
-        blend
-          ? 'Select reference images on the board (or a frame containing them).'
-          : 'Select reference images/videos/audio on the board (or a frame containing them).',
-      );
-      return;
-    }
-    if (!prompt.trim()) {
-      setNote(
-        blend
-          ? 'Describe the shot — the references are blended into it.'
-          : 'Describe the shot. Name your references (by their board title) to place them.',
-      );
+    if (blockReason) {
+      setNote(blockReason);
       return;
     }
     const input = buildInput(fields, values);
@@ -239,7 +211,7 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
     };
 
     const connectIds = [...images.map((i) => i.id), ...videos.map((v) => v.id), ...audios.map((a) => a.id)];
-    if (sticky.anchorId) connectIds.push(sticky.anchorId);
+    connectIds.push(...noteBasket.items.map((n) => n.id));
 
     try {
       // If every reference already lives in the same frame, drop the card in
@@ -268,8 +240,6 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
     }
   };
 
-  const total = images.length + videos.length + audios.length;
-
   return (
     <div className="screen">
       <div className="hero">
@@ -281,107 +251,56 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
 
       {schema.status !== 'loading' && (
         <>
-          <div className={`source-image ${total ? 'chosen' : ''}`}>
-            {total ? (
-              blend ? (
-                <>
-                  <span className="check">✓</span> {images.length} reference image
-                  {images.length === 1 ? '' : 's'} → blended into one scene
-                </>
-              ) : (
-                <>
-                  <span className="check">✓</span> {images.length} image{images.length === 1 ? '' : 's'}
-                  {videos.length ? ` · ${videos.length} video${videos.length === 1 ? '' : 's'}` : ''}
-                  {audios.length ? ` · ${audios.length} audio${audios.length === 1 ? '' : ' clips'}` : ''} → sent as
-                  {' '}
-                  {images.length ? <code>@Image1…{images.length}</code> : null}
-                  {videos.length ? (
-                    <>
-                      {' '}
-                      <code>@Video1…{videos.length}</code>
-                    </>
-                  ) : null}
-                  {audios.length ? (
-                    <>
-                      {' '}
-                      <code>@Audio1…{audios.length}</code>
-                    </>
-                  ) : null}
-                </>
-              )
-            ) : blend ? (
-              <>Select reference images on the board — or a frame that contains them.</>
-            ) : (
-              <>
-                Select reference images/videos{supportsAudio ? '/audio' : ''} on the board — or a frame that
-                contains them.
-              </>
-            )}
-          </div>
+          {/* One row per reference kind. Chip order is token order, so the
+              numbered chips ARE the @Image1/@Video1/@Audio1 legend. */}
+          {/* Chip order is token order — the numbered rows ARE the
+              @Image1/@Video1/@Audio1 legend. */}
+          <BasketPanel
+            basket={imageBasket}
+            title="Image references"
+            cap={maxImages}
+            showTokens={!blend}
+            onInsertToken={(t) => setPromptText((p) => (p && !/\s$/.test(p) ? `${p} ${t}` : p + t))}
+          />
 
-          {overflow && (
-            <div className="ref-hint muted">
-              {blend
-                ? `Veo takes up to ${maxImages} reference images — extra selections are ignored.`
-                : `Seedance takes up to ${SEEDANCE_MAX_IMAGES} images, ${SEEDANCE_MAX_VIDEOS} videos${
-                    supportsAudio ? `, and ${SEEDANCE_MAX_AUDIO} audio clips` : ''
-                  } — extra selections are ignored.`}
-            </div>
+          {!blend && (
+            <BasketPanel
+              basket={videoBasket}
+              title="Video references"
+              cap={SEEDANCE_MAX_VIDEOS}
+              onInsertToken={(t) => setPromptText((p) => (p && !/\s$/.test(p) ? `${p} ${t}` : p + t))}
+            />
           )}
 
-          {!blend && bound && total > 0 && (
-            <div className="ref-map">
-              {bound.image_urls.map((id, i) => (
-                <div className="ref-row" key={`img-${id}`}>
-                  <code>@Image{i + 1}</code>
-                  <span>{titleFor(id) ?? '(untitled — name it on the board)'}</span>
-                </div>
-              ))}
-              {bound.audio_urls.map((id, i) => (
-                <div className="ref-row" key={`aud-${id}`}>
-                  <code>@Audio{i + 1}</code>
-                  <span>{titleFor(id) ?? '(untitled)'}</span>
-                </div>
-              ))}
-              {bound.video_urls.map((id, i) => (
-                <div className="ref-row" key={`vid-${id}`}>
-                  <code>@Video{i + 1}</code>
-                  <span>{titleFor(id) ?? '(untitled)'}</span>
-                </div>
-              ))}
-            </div>
+          {supportsAudio && (
+            <BasketPanel
+              basket={audioBasket}
+              title="Audio"
+              cap={SEEDANCE_MAX_AUDIO}
+              onInsertToken={(t) => setPromptText((p) => (p && !/\s$/.test(p) ? `${p} ${t}` : p + t))}
+            />
           )}
 
-          {blend && total > 0 && (
-            <div className="ref-hint">
-              Each image contributes visual cues (subject, palette, lighting, setting); Veo blends
-              them — there's no per-image addressing.
-            </div>
-          )}
+          <PromptBasket
+            basket={noteBasket}
+            text={promptText}
+            onTextChange={setPromptText}
+            counts={{ Image: images.length, Video: videos.length, Audio: audios.length }}
+          />
 
           <SchemaForm
             fields={fields}
             commonOrder={COMMON_ARGS.video}
             values={values}
-            onChange={(name, value) => {
-              if (name === 'prompt') setEditedPrompt(true);
-              setValues((v) => ({ ...v, [name]: value }));
-            }}
-            hide={audioField && !REFERENCE_FIELDS.includes(audioField.name) ? [...REFERENCE_FIELDS, audioField.name] : REFERENCE_FIELDS}
+            onChange={(name, value) => setValues((v) => ({ ...v, [name]: value }))}
+            hide={[
+              ...(audioField && !REFERENCE_FIELDS.includes(audioField.name)
+                ? [...REFERENCE_FIELDS, audioField.name]
+                : REFERENCE_FIELDS),
+              // The prompt basket owns this field.
+              'prompt',
+            ]}
           />
-
-          {editedPrompt && (
-            <button
-              type="button"
-              className="reset-link"
-              onClick={() => {
-                setEditedPrompt(false);
-                setNote(null);
-              }}
-            >
-              ↻ Reset prompt to sticky
-            </button>
-          )}
 
           {!blend && bound && (
             <details className="preview">
@@ -403,7 +322,13 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
             <button type="button" className="secondary" onClick={onSaveCard}>
               Save as settings card
             </button>
-            <button type="button" className="primary" onClick={onGenerate}>
+            <button
+              type="button"
+              className="primary"
+              onClick={onGenerate}
+              disabled={Boolean(blockReason)}
+              title={blockReason ?? undefined}
+            >
               Generate video
             </button>
           </div>

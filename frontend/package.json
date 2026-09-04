@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "lint": "tsc --noEmit"
+    "lint": "npm run typecheck && npm run lint:boundaries",
+    "typecheck": "tsc --noEmit",
+    "lint:boundaries": "depcruise --config .dependency-cruiser.cjs src",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@fal-ai/client": "^1.10.1",
@@ -22,7 +26,13 @@
     "@types/react-dom": "^18.2.0",
     "@types/three": "^0.160.0",
     "@vitejs/plugin-react": "^4.2.1",
+    "dependency-cruiser": "^18.2.0",
+    "jsdom": "^29.1.1",
     "typescript": "^5.4.5",
-    "vite": "^5.2.0"
+    "vite": "^5.2.0",
+    "vitest": "^2.1.9"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

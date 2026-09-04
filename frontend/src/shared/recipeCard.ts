@@ -10,7 +10,7 @@
 
 import type { Capability } from './falCatalog';
 import type { ResolvedBoardItems } from './boardHelpers';
-import type { Field } from './schema';
+import { pickPromptField, type Field } from './schema';
 
 export const RECIPE_CARD_VERSION = 1;
 
@@ -98,7 +98,8 @@ function coerceForField(field: Field, text: string): unknown {
  * label matches it (case/spacing-insensitive) — "Seed: 42", "Negative
  * prompt: blurry", "Aspect ratio: 16:9". `prompt` is just the common case of
  * this, not special-cased. A single sticky that matches no field (including
- * one with no colon at all) falls back to the prompt field, so plain
+ * one with no colon at all) falls back to the model's primary text field
+ * (`prompt`, or `text` for the models that call it that), so plain
  * single-sticky use still doesn't require typing a label.
  */
 export function resolveStickyFieldOverrides(
@@ -123,9 +124,12 @@ export function resolveStickyFieldOverrides(
     }
   }
 
-  if (!('prompt' in out) && unmatched.length === 1) {
+  // Falls back to whichever field is this model's actual primary text field
+  // — usually `prompt`, but some (mostly TTS) models call it `text`.
+  const promptFieldName = pickPromptField(fields)?.name ?? 'prompt';
+  if (!(promptFieldName in out) && unmatched.length === 1) {
     const text = unmatched[0].trim();
-    if (text) out.prompt = text;
+    if (text) out[promptFieldName] = text;
   }
 
   return out;
