@@ -598,26 +598,6 @@ select:focus {
   color: var(--accent);
 }
 
-/* Model metadata chips (category + tags from fal metadata) */
-.model-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.chip {
-  font: 600 11px 'Roobert PRO', system-ui, sans-serif;
-  color: var(--muted);
-  background: var(--card-2);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 3px 9px;
-}
-.chip-cat {
-  color: var(--on-accent);
-  background: var(--accent);
-  border-color: transparent;
-}
-
 /* Reference-to-video token map */
 .ref-map {
   display: flex;
@@ -1134,244 +1114,428 @@ input[type='range'] {
   }
 }
 
-/* ---------------------------------------------------------------------------
-   Prompt source control — see panel/PromptSourceControl.tsx.
-   Deliberately NOT `.seg`: nav uses a filled --card-2 track holding raised
-   pills, this is an outlined container with a flat active fill and hairline
-   dividers, under an uppercase label nav never has. Cyan (--info) means
-   "the board is driving this"; --accent stays reserved for Generate.
-   --------------------------------------------------------------------------- */
-.ps {
+/* 3D multi-view slots keep deliberate assignment — a live source can't decide
+   which of four named angles a selection belongs to — and only borrow the
+   cyan "bound" frame. */
+.view-slot.bound {
+  border-color: rgba(75, 209, 246, 0.38);
+  background: rgba(75, 209, 246, 0.05);
+}
+.view-slot.bound .view-slot-name {
+  color: var(--info);
+}
+
+.view-slot {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 6px;
+  align-items: flex-start;
 }
-
-.ps-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.ps-title {
-  font: 600 10.5px 'Roobert PRO', system-ui, sans-serif;
-  color: var(--muted);
+.view-slot-name {
+  font: 600 10px 'Roobert PRO', system-ui, sans-serif;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+  color: var(--muted-2);
 }
-
-/* The one-shot verb. A pill with an icon that never latches — shape, row and
-   behaviour all say "action", so it can't read as a fourth mode. */
-.ps-pull {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  background: var(--card-2);
-  border: 1px solid var(--border-strong);
+.view-slot-item {
+  font: 500 10.5px 'Roobert PRO', system-ui, sans-serif;
   color: var(--fg-2);
-  border-radius: var(--radius-pill);
-  cursor: pointer;
-  transition: background 120ms var(--ease), color 120ms var(--ease), border-color 120ms var(--ease);
-}
-.ps-pull:hover:not(:disabled) {
-  background: #232329;
-  color: var(--fg);
-  border-color: rgba(255, 255, 255, 0.28);
-}
-.ps-pull:disabled {
-  opacity: 0.4;
-  cursor: default;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
-.ps-seg {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  border: 1px solid var(--border-strong);
-  border-radius: 9px;
-  overflow: hidden;
-}
-.ps-seg button {
+/* ---------------------------------------------------------------------------
+   Reference baskets — see panel/Basket.tsx.
+   An ordered list the user builds: no modes, no mirroring of the selection.
+   Replaces the binding rows, which failed in testing because a mode could
+   silently stop following what the user was doing.
+   --------------------------------------------------------------------------- */
+.bk {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 7px 4px;
-  border: none;
-  cursor: pointer;
-  font: 600 11px 'Roobert PRO', system-ui, sans-serif;
-  background: transparent;
-  color: var(--muted);
-}
-.ps-seg button + button {
-  border-left: 1px solid var(--border);
-}
-.ps-seg button.active {
-  background: var(--card-2);
-  color: var(--fg);
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
 }
 
-.ps-dot-sm {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--info);
-  flex: 0 0 auto;
-}
-
-/* A driven field is read-only and looks it: the textarea gives up its own
-   border and becomes the body of a cyan-edged frame. */
-.ps-frame {
-  border: 1px solid rgba(75, 209, 246, 0.38);
-  border-radius: 10px;
-  overflow: hidden;
-  background: var(--card);
-}
-.ps-frame.empty {
-  border-color: rgba(75, 209, 246, 0.22);
-}
-.ps-frame textarea {
-  padding: 10px 12px;
-  border: none;
-  background: transparent;
-  color: var(--fg-2);
-  font: 400 13px/1.5 'Roobert PRO', system-ui, sans-serif;
-  width: 100%;
-  outline: none;
-  display: block;
-  cursor: default;
-  resize: vertical;
-}
-
-.ps-strip {
+.bk-head {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 10px;
-  background: rgba(75, 209, 246, 0.07);
-  border-bottom: 1px solid rgba(75, 209, 246, 0.16);
 }
-.ps-live {
-  font: 600 11px 'Roobert PRO', system-ui, sans-serif;
+.bk-title {
+  font: 500 13px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--muted);
+}
+.bk-title:empty {
+  display: none;
+}
+.bk-count {
+  margin-left: auto;
+  background: var(--card-2);
+  border-radius: var(--radius-pill);
+  padding: 2px 7px;
+  font: 600 10px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+.bk-count.warn {
+  background: rgba(242, 90, 110, 0.12);
+  color: var(--err);
+}
+
+.bk-ghost {
+  background: none;
+  border: none;
+  padding: 2px 0 2px 8px;
+  cursor: pointer;
+  font: 500 10.5px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+.bk-ghost:hover {
+  color: var(--fg-2);
+}
+.bk-more-rows {
+  align-self: flex-start;
+  padding: 2px 0 0;
+}
+
+.bk-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* One line per item. Drag to reorder — the handle is the affordance, and not
+   having up/down buttons buys ~30px back for the title at 300px wide. */
+.bk-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #16161a;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 4px 5px;
+  cursor: grab;
+}
+.bk-row.dragging {
+  opacity: 0.45;
+}
+.bk-row.missing {
+  background: rgba(242, 90, 110, 0.07);
+  border-color: rgba(242, 90, 110, 0.24);
+}
+.bk-grab {
+  flex: 0 0 auto;
+  color: #4d4d55;
+}
+
+.bk-thumb {
+  flex: 0 0 auto;
+  width: 19px;
+  height: 19px;
+  border-radius: 4px;
+  background: #33384a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 600 8px 'Roobert PRO', system-ui, sans-serif;
+  color: rgba(255, 255, 255, 0.7);
+}
+.bk-thumb.video {
+  background: #2f3f4d;
+}
+.bk-thumb.audio {
+  background: #4d3b3b;
+}
+/* Square, like the sticky it stands for — the design called for a 9x19 bar,
+   but at 300px that reads as a divider rather than a note. Muted amber, not
+   --accent: yellow is reserved for Generate, and spending it here weakens the
+   one thing it is supposed to mean. */
+.bk-thumb.note {
+  background: #4a4327;
+  color: #d8c98a;
+}
+
+/* The token, not the filename, is the primary identifier: position is the
+   meaning, and @Image2 is what the prompt actually refers to. */
+.bk-token {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: 600 10.5px 'Roobert PRO', system-ui, sans-serif;
   color: var(--info);
+  font-variant-numeric: tabular-nums;
 }
-.ps-unlink {
+.bk-token.static {
+  cursor: default;
+}
+.bk-row.missing .bk-token {
+  color: var(--err);
+}
+
+.bk-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 10.5px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--fg-2);
+}
+.bk-row.missing .bk-label {
+  color: var(--muted);
+}
+
+.bk-x {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--muted);
+}
+.bk-x:hover {
+  color: var(--fg);
+}
+
+.bk-empty {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 9px;
+  padding: 9px 10px;
+  font: 400 11px/1.5 'Roobert PRO', system-ui, sans-serif;
+  color: var(--muted-2);
+  background: #121215;
+  text-wrap: pretty;
+}
+
+.bk-warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(242, 90, 110, 0.07);
+  border: 1px solid rgba(242, 90, 110, 0.24);
+  border-radius: 8px;
+  padding: 5px 7px;
+  font: 500 10.5px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--fg-2);
+}
+.bk-warn.plain {
+  color: var(--muted);
+}
+.bk-warn button {
   margin-left: auto;
   background: none;
   border: none;
   padding: 0;
-  color: var(--fg-2);
-  font: 600 11px 'Roobert PRO', system-ui, sans-serif;
   cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.ps-unlink:hover {
-  color: var(--fg);
-}
-
-.ps-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--info);
+  font: 600 10.5px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--err);
   flex: 0 0 auto;
-  animation: pslive 1.6s ease-in-out infinite;
-}
-/* Armed and waiting, not broken: hollow and still. */
-.ps-dot.hollow {
-  background: transparent;
-  border: 1.5px solid var(--info);
-  animation: none;
 }
 
-@keyframes pslive {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.45;
-    transform: scale(0.82);
-  }
-}
-
-.ps-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding-top: 1px;
-}
-.ps-chip {
+/* Every add is reversible in one click — which is what makes offering
+   "add from connectors" safe, after the previous version's one-way nudge. */
+.bk-undo {
   display: flex;
   align-items: center;
-  gap: 5px;
-  background: var(--card-2);
-  border: 1px solid var(--border);
+  gap: 6px;
+  background: #14171a;
+  border: 1px solid rgba(75, 209, 246, 0.22);
   border-radius: 8px;
-  padding: 3px 7px;
+  padding: 5px 7px;
+}
+.bk-undo span {
   font: 500 10.5px 'Roobert PRO', system-ui, sans-serif;
   color: var(--muted);
-  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.ps-chip-n {
+.bk-undo button {
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: 600 10.5px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--info);
+  flex: 0 0 auto;
+}
+
+.bk-actions {
+  display: flex;
+  gap: 5px;
+  position: relative;
+}
+
+/* The Add button says what it will take, so nothing lands where you didn't
+   look. The count is free — it comes off the selection event. */
+.bk-add {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border-radius: var(--radius-pill);
+  padding: 6px 11px;
+  font: 500 11.5px 'Roobert PRO', system-ui, sans-serif;
+  background: var(--card);
+  border: 1px solid rgba(255, 255, 255, 0.07);
   color: var(--muted-2);
-  font-variant-numeric: tabular-nums;
+  cursor: default;
 }
-.ps-chip-label {
-  color: var(--fg-2);
+.bk-add.on {
+  background: var(--card-2);
+  border-color: var(--border-strong);
+  color: var(--fg);
+  cursor: pointer;
+}
+.bk-add span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ps-empty {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: var(--card);
+.bk-dots {
+  flex: 0 0 auto;
+  width: 29px;
   display: flex;
-  gap: 8px;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: center;
+  background: var(--card-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  color: var(--fg-2);
+  padding: 0;
+}
+.bk-dots.on {
+  background: #26262c;
+}
+
+.bk-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 5px);
+  z-index: 8;
+  background: var(--card-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
+}
+.bk-menu button {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 7px;
+  padding: 6px 8px;
+  cursor: pointer;
+  color: var(--fg);
+}
+.bk-menu button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+}
+.bk-menu button:disabled {
+  cursor: default;
   color: var(--muted-2);
 }
-.ps-empty span {
-  font: 400 11.5px/1.55 'Roobert PRO', system-ui, sans-serif;
+.bk-menu-label {
+  font: 500 11.5px 'Roobert PRO', system-ui, sans-serif;
+}
+.bk-menu-note {
+  font: 400 9.5px 'Roobert PRO', system-ui, sans-serif;
+  color: var(--muted-2);
+}
+.bk-url {
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  padding: 6px 8px;
+  color: var(--fg);
+  font: 400 11.5px 'Roobert PRO', system-ui, sans-serif;
+  outline: none;
+  margin-bottom: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   The prompt basket — notes list + free text, concatenated at send time and
+   never merged, so neither half can destroy the other.
+   --------------------------------------------------------------------------- */
+.pb {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 11px;
+}
+.pb-text {
+  width: 100%;
+  background: #121215;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 8px 9px;
+  color: var(--fg);
+  font: 400 12px/1.55 'Roobert PRO', system-ui, sans-serif;
+  outline: none;
+  resize: vertical;
+}
+.pb-sent {
+  background: #121215;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 9px;
+  padding: 8px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.pb-sent-label {
+  font: 600 9.5px 'Roobert PRO', system-ui, sans-serif;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+.pb-sent-body {
+  font: 400 11px/1.6 'Roobert PRO', system-ui, sans-serif;
   color: var(--fg-2);
   text-wrap: pretty;
+  word-break: break-word;
 }
-.ps-empty svg {
-  flex: 0 0 auto;
-  margin-top: 2px;
+.pb-tok.token {
+  font-weight: 600;
+  color: var(--info);
 }
-
-.ps-note {
-  font: 400 11px/1.5 'Roobert PRO', system-ui, sans-serif;
+/* A token pointing past the end of its basket — flagged, never rewritten. */
+.pb-tok.dangling {
+  font-weight: 600;
+  color: var(--err);
+  text-decoration: underline wavy rgba(242, 90, 110, 0.6);
+  text-underline-offset: 2px;
+}
+.pb-empty {
   color: var(--muted-2);
+}
+.pb-dangling {
+  font: 500 10.5px/1.45 'Roobert PRO', system-ui, sans-serif;
+  color: var(--err);
   text-wrap: pretty;
-}
-
-/* Confirmation after a one-shot pull — including that Off stayed Off, which
-   is the reassurance the old silent autofill never gave. */
-.ps-pulled {
-  font: 500 11px/1.5 'Roobert PRO', system-ui, sans-serif;
-  color: var(--ok);
-  text-wrap: pretty;
-}
-
-/* A live mode with nothing to supply. Sits above the ordinary editable prompt
-   field rather than replacing it — armed and waiting must never mean blocked
-   (see PromptWaitingHint). */
-.ps-waiting {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 6px;
-}
-.ps-waiting .ps-empty {
-  grid-column: 1 / -1;
 }

@@ -381,40 +381,6 @@ export async function setFavourites(keys: string[]): Promise<void> {
   localStorage.setItem(FAVOURITES_KEY, JSON.stringify(keys));
 }
 
-// ---------------------------------------------------------------------------
-// Prompt source — where a model screen's Prompt box gets its text.
-//
-//   'off'        the box is the user's; the board never writes to it
-//   'selection'  live-follows the selected sticky notes
-//   'connected'  follows sticky notes wired by a connector to the source image
-//
-// Read synchronously (unlike the two above) because it decides what the very
-// first render of a prompt field shows — an async read would let the box paint
-// empty and then fill in, which is the flicker this whole control exists to
-// remove. Defaults to 'off': autofill is now opt-in.
-// ---------------------------------------------------------------------------
-export type PromptSource = 'off' | 'selection' | 'connected';
-
-const PROMPT_SOURCE_KEY = 'fal:promptSource';
-
-export function loadPromptSource(): PromptSource {
-  try {
-    const raw = localStorage.getItem(PROMPT_SOURCE_KEY);
-    if (raw === 'off' || raw === 'selection' || raw === 'connected') return raw;
-  } catch (e) {
-    console.warn('[storage] loadPromptSource failed:', e);
-  }
-  return 'off';
-}
-
-export function savePromptSource(mode: PromptSource): void {
-  try {
-    localStorage.setItem(PROMPT_SOURCE_KEY, mode);
-  } catch (e) {
-    console.warn('[storage] savePromptSource failed:', e);
-  }
-}
-
 export async function getItemGenerationSettings<T = unknown>(itemId: string): Promise<T | null> {
   try {
     const item = await miro.board.getById(itemId);
