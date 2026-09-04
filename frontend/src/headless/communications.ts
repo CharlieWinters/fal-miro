@@ -1,4 +1,4 @@
-import { agentRegistry } from '../shared/agentRegistry';
+import type { AgentRegistry } from '../shared/agentTypes';
 import {
   RUN_AGENT,
   AGENT_UPDATE,
@@ -26,7 +26,7 @@ export function broadcastUpdate(update: Omit<AgentUpdateMessage, 'type'>): void 
   }
 }
 
-const handleMessage = async (event: MessageEvent) => {
+const makeHandler = (registry: AgentRegistry) => async (event: MessageEvent) => {
   if (event.origin !== currentOrigin) return;
 
   const message = event.data as Partial<RunAgentMessage>;
@@ -36,7 +36,7 @@ const handleMessage = async (event: MessageEvent) => {
   const { agentId, payload, requestId = '' } = message;
   if (!agentId) return;
 
-  const agent = agentRegistry[agentId];
+  const agent = registry[agentId];
   if (!agent?.run) {
     console.warn(`[headless] Unknown agent: ${agentId}`);
     broadcastUpdate({
@@ -83,11 +83,19 @@ function describeApiErrorBody(err: unknown): string | null {
   return null;
 }
 
-export function initializeMessageListener(): void {
+/**
+ * Start listening for RUN_AGENT.
+ *
+ * The registry is passed in rather than imported so that this module stays
+ * below the agents in the dependency graph. Importing it here would close the
+ * loop — agent logic imports broadcastUpdate from this file, so this file
+ * importing the registry (which imports every agent) would make the two
+ * mutually dependent. headless/index.ts is the composition root and is the
+ * only place that knows both halves.
+ */
+export function initializeMessageListener(registry: AgentRegistry): void {
   if (listenerAttached) return;
-  window.addEventListener('message', handleMessage);
+  window.addEventListener('message', makeHandler(registry));
   listenerAttached = true;
   console.log('[headless] RUN_AGENT listener ready');
 }
-
-initializeMessageListener();
