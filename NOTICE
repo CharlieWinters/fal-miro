@@ -1,0 +1,28 @@
+# Third-party notices
+
+## Provider logos
+
+`frontend/public/logos/` contains word marks and logos belonging to the model
+providers this app can call — Google, OpenAI, Meta, ByteDance, Alibaba,
+Tencent, Black Forest Labs, Stability AI, Ideogram, Luma, Kling, Lightricks,
+Meshy, Bria, ElevenLabs, Veed, xAI and fal.ai among them.
+
+They are used solely to identify each provider in the model picker. They are
+**not** covered by this project's MIT licence, are not the project's to
+sublicense, and remain the property of their respective owners. No affiliation
+with or endorsement by any of them is claimed.
+
+If you own one of these marks and would rather it were not here, open an issue
+and it will be removed.
+
+## Runtime dependencies loaded from a CDN
+
+The embed pages load two libraries directly from public CDNs rather than
+bundling them, each pinned and integrity-checked:
+
+- [`@google/model-viewer`](https://modelviewer.dev) 3.5.0 — the 3D and
+  rigged-character viewers. The package is Apache-2.0; the built bundle also
+  carries BSD-3-Clause and MIT components.
+- [`A-Frame`](https://aframe.io) 1.5.0 (MIT) — the 360° panorama viewer
+
+The Miro Web SDK is loaded from `miro.com` as Miro requires.
