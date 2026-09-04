@@ -24,12 +24,32 @@ long version.
 Before you open a PR:
 
 ```bash
-cd frontend && npm run lint && npm run build   # typecheck + boundary rules + build
+cd frontend && npm run lint && npm test && npm run build
 cd backend  && npm run typecheck
 ```
 
-CI runs exactly these. `npm run lint:boundaries` on its own runs just the
-boundary check described below.
+CI runs exactly these. `npm run lint` is typecheck plus the boundary rules;
+`npm run lint:boundaries` runs just the boundary check described below, and
+`npm run test:watch` is the usual loop while writing tests.
+
+### What the tests cover, and what they don't
+
+Vitest, no coverage threshold. The suite is aimed at the hull rather than
+spread evenly: `falCatalog`'s routing rules, `assetNaming`'s user-supplied
+regular expressions, `cost`'s timing parser and the prompt assembler. Those are
+the modules where a mistake is silent — a wrong routing rule doesn't throw, it
+just sends a model to the wrong screen or drops it out of the browser
+altogether.
+
+Two of those rules had been wrong in exactly that way before the tests existed,
+so several cases are written directly against the real endpoint names that
+broke. When you add a rule to `ENDPOINT_OVERRIDES`, add the endpoint it is meant
+to catch **and** a sibling it must not — `whenCategory` exists because name
+patterns alone are far too blunt across a 1,500-model catalog.
+
+Not covered: anything needing a live board. `useBasket`'s stateful half, the
+agents, and the screens are all verified by hand. If you are changing those,
+say in the PR how you tested them.
 
 ## The architecture, and why it looks over-duplicated
 
