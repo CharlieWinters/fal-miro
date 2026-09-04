@@ -4,10 +4,6 @@
 into a reusable, parameterised pipeline (e.g. "text → rigged 3D character") that
 re-runs the same models automatically from a new input.
 
-> Also intended for the project Miro board
-> (`https://miro.com/app/board/uXjVH_mheZg=/`) — blocked at time of writing by the
-> board's content-security classification; post there once MCP access is granted.
-
 ## The core reframe
 
 Lineage is already a **DAG of `(model, inputs, parent-wiring)`** — every
