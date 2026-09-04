@@ -118,12 +118,37 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.token, schema.status]);
 
+  /**
+   * Why Generate can't run yet, or null — drives both the disabled button and
+   * the message, so a missing required input shows before the click rather
+   * than only as an error after it. Same shape as ImageGenScreen's.
+   */
+  const blockReason: string | null = (() => {
+    if (imageBasket.hasMissing) return 'An image in the basket is no longer on the board — remove it first.';
+    if (videoBasket.hasMissing) return 'A video in the basket is no longer on the board — remove it first.';
+    if (noteBasket.hasMissing) return 'A sticky note in the prompt is no longer on the board — remove it first.';
+    if (referenceField?.required && refImageIds.length === 0) {
+      return `Add ${multiImage ? 'one or more images' : 'an image'} to the ${multiImage ? 'Images' : 'Image'} basket first — select on the board, then press Add.`;
+    }
+    if (videoReferenceField?.required && refVideoIds.length === 0) {
+      return `Add ${multiVideo ? 'one or more Fal videos' : 'a Fal video'} to the ${multiVideo ? 'Videos' : 'Video'} basket first — select on the board, then press Add.`;
+    }
+    if (promptField?.required && !fullPrompt.trim()) {
+      return 'Type a prompt, or add sticky notes to the prompt basket.';
+    }
+    return null;
+  })();
+
   const onChange = (name: string, value: unknown) => {
     setValues((v) => ({ ...v, [name]: value }));
   };
 
   const onGenerate = () => {
     setNote(null);
+    if (blockReason) {
+      setNote(blockReason);
+      return;
+    }
     let input: Record<string, unknown>;
     try {
       input = buildInput(fields, values);
@@ -133,19 +158,6 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
       setNote(e instanceof Error ? e.message : 'Invalid input.');
       return;
     }
-    if (referenceField?.required && refImageIds.length === 0 && !input[referenceField.name]) {
-      setNote(`Select ${multiImage ? 'one or more images' : 'an image'} on the board for this model.`);
-      return;
-    }
-    if (videoReferenceField?.required && refVideoIds.length === 0 && !input[videoReferenceField.name]) {
-      setNote(`Select ${multiVideo ? 'one or more Fal videos' : 'a Fal video'} on the board for this model.`);
-      return;
-    }
-    if (promptField?.required && !String(input[promptField.name] ?? '').trim()) {
-      setNote('Type a prompt, or add sticky notes to the prompt basket.');
-      return;
-    }
-
     startAgentJob({
       agentId: 'fal_generic',
       label: model.label,
@@ -282,7 +294,13 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
             <button type="button" className="secondary" onClick={onSaveCard}>
               Save as settings card
             </button>
-            <button type="button" className="primary" onClick={onGenerate}>
+            <button
+              type="button"
+              className="primary"
+              onClick={onGenerate}
+              disabled={Boolean(blockReason)}
+              title={blockReason ?? undefined}
+            >
               Run model
             </button>
           </div>

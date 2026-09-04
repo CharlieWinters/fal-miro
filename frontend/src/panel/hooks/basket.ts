@@ -12,7 +12,7 @@
 // the whole meaning. Seedance addresses items as @Image1…@ImageN; the app's
 // own pipelines say "the garment in the first image". Reordering renumbers.
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { unwrapAudioEmbedUrl, unwrapVideoEmbedUrl } from '../../lib/api';
 import { getConnectedResources } from '../../shared/boardHelpers';
 import { labelOf, type BasketKind, type ClassifiedSelection, type SelectedItem } from './boardSelection';
@@ -183,6 +183,29 @@ export function useBasket(kind: BasketKind, selection: ClassifiedSelection): Bas
     },
     [append],
   );
+
+  // A basket holds board item ids, so an item deleted on the board leaves a
+  // row pointing at nothing. Flag it rather than dropping it silently: the
+  // user may have deleted it by accident, and a row vanishing on its own is
+  // exactly the kind of invisible change baskets exist to avoid. Driven by the
+  // board's own delete event, so it costs no SDK calls.
+  useEffect(() => {
+    const handler = (event: { items?: Array<{ id: string }> }) => {
+      const gone = new Set((event?.items ?? []).map((i) => i.id));
+      if (!gone.size) return;
+      setItems((cur) => (cur.some((i) => gone.has(i.id) && !i.missing)
+        ? cur.map((i) => (gone.has(i.id) ? { ...i, missing: true } : i))
+        : cur));
+    };
+    miro.board.ui.on('items:delete', handler);
+    return () => {
+      try {
+        miro.board.ui.off('items:delete', handler);
+      } catch {
+        /* older SDKs */
+      }
+    };
+  }, []);
 
   const remove = useCallback((uid: number) => {
     setItems((cur) => cur.filter((i) => i.uid !== uid));

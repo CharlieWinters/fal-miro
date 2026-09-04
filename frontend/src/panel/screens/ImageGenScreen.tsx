@@ -246,34 +246,42 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
     if (!assetEdited) setAssetName(detectedAsset ?? '');
   }, [detectedAsset, assetEdited]);
 
+  /**
+   * Why Generate can't run yet, or null. Drives both the disabled button and
+   * the message, so a missing required input is visible *before* the click
+   * rather than only as an error after it — an edit model with an empty image
+   * basket is the common case.
+   */
+  const blockReason: string | null = (() => {
+    // A row whose board item was deleted would send a dead reference.
+    if (imageBasket.hasMissing) return 'An image in the basket is no longer on the board — remove it first.';
+    if (videoBasket.hasMissing) return 'A video in the basket is no longer on the board — remove it first.';
+    if (noteBasket.hasMissing) return 'A sticky note in the prompt is no longer on the board — remove it first.';
+    if (imageRequired && effectiveSelectedImages.length === 0) {
+      return `Add ${takesMulti ? 'one or more images' : 'an image'} to the Image basket first — select on the board, then press Add.`;
+    }
+    if (videoRequired && effectiveSelectedVideos.length === 0) {
+      return `Add ${takesMultiVideo ? 'one or more Fal videos' : 'a Fal video'} to the Video basket first — select on the board, then press Add.`;
+    }
+    if (multiView) {
+      const missing = viewFields.find((f) => f.required && !views[f.name]);
+      if (missing) return `Assign an image to the required "${missing.label}" view.`;
+    }
+    if (!fullPrompt.trim() && !imagePrimary && !videoPrimary) {
+      return 'Type a prompt, or add sticky notes to the prompt basket.';
+    }
+    return null;
+  })();
+
   const onChange = (name: string, value: unknown) => {
     setValues((v) => ({ ...v, [name]: value }));
   };
 
   const onGenerate = () => {
     setNote(null);
-    if (imageRequired && takesMulti && effectiveSelectedImages.length === 0) {
-      setNote('Select one or more images on the board (shift-click to add several).');
+    if (blockReason) {
+      setNote(blockReason);
       return;
-    }
-    if (imageRequired && takesSingle && !effectiveSourceImage) {
-      setNote('Select an image on the board to use as the source.');
-      return;
-    }
-    if (videoRequired && takesMultiVideo && effectiveSelectedVideos.length === 0) {
-      setNote('Select one or more Fal videos on the board (shift-click to add several).');
-      return;
-    }
-    if (videoRequired && takesSingleVideo && !effectiveSourceVideo) {
-      setNote('Select a Fal video on the board to use as the source clip.');
-      return;
-    }
-    if (multiView) {
-      const missing = viewFields.find((f) => f.required && !views[f.name]);
-      if (missing) {
-        setNote(`Assign an image to the required "${missing.label}" view.`);
-        return;
-      }
     }
     let input: Record<string, unknown>;
     try {
@@ -292,11 +300,6 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
       const stripped = stripAssetName(input.prompt, assetCfg);
       if (stripped.trim()) input.prompt = stripped;
     }
-    if (!fullPrompt.trim() && !imagePrimary && !videoPrimary) {
-      setNote('Type a prompt, or add sticky notes to the prompt basket.');
-      return;
-    }
-
     startAgentJob({
       agentId: isPanorama
         ? 'fal_image_to_panorama'
@@ -551,7 +554,13 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
             <button type="button" className="secondary" onClick={onSaveCard}>
               Save as settings card
             </button>
-            <button type="button" className="primary" onClick={onGenerate}>
+            <button
+              type="button"
+              className="primary"
+              onClick={onGenerate}
+              disabled={Boolean(blockReason)}
+              title={blockReason ?? undefined}
+            >
               {isPanorama
                 ? 'Generate panorama'
                 : is3d

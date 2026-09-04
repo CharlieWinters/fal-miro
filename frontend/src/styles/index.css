@@ -17,6 +17,10 @@
   --ok: #6edb8c;
   --err: #f25a6e;
   --info: #4bd1f6;
+  /* Section separators. Brand yellow, but well below the solid --accent used
+     by Generate — enough to read as a deliberate divide at 300px without
+     competing with the one thing yellow is supposed to mean. */
+  --rule: rgba(255, 221, 51, 0.32);
   --radius-panel: 16px;
   --radius-card: 12px;
   --radius-pill: 999px;
@@ -1485,7 +1489,7 @@ input[type='range'] {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--rule);
   padding-top: 11px;
 }
 .pb-text {
@@ -1538,4 +1542,22 @@ input[type='range'] {
   font: 500 10.5px/1.45 'Roobert PRO', system-ui, sans-serif;
   color: var(--err);
   text-wrap: pretty;
+}
+
+/* A primary action that can't run yet — the reason is on the button's title
+   and, for a missing basket item, stated on the basket itself. */
+button.primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Section separators. Each input group — Images, Videos, Audio, Prompt, then
+   the model's own settings — reads as its own block rather than one long
+   column. The prompt basket carries its own border-top already, so this only
+   needs the basket-to-basket and prompt-to-settings joins. Same hairline as
+   .pb uses: a heavier rule would fight the basket frames for attention. */
+.bk + .bk,
+.pb + .schema-form {
+  border-top: 1px solid var(--rule);
+  padding-top: 11px;
 }

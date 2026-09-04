@@ -142,22 +142,32 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
     [blend, prompt, images, videos, audios],
   );
 
-  const onGenerate = () => {
-    setNote(null);
+  /**
+   * Why Generate can't run yet, or null — drives both the disabled button and
+   * the message. Same shape as the other two screens.
+   */
+  const blockReason: string | null = (() => {
+    if (imageBasket.hasMissing) return 'An image in the basket is no longer on the board — remove it first.';
+    if (videoBasket.hasMissing) return 'A video in the basket is no longer on the board — remove it first.';
+    if (audioBasket.hasMissing) return 'An audio clip in the basket is no longer on the board — remove it first.';
+    if (noteBasket.hasMissing) return 'A sticky note in the prompt is no longer on the board — remove it first.';
     if (images.length === 0 && videos.length === 0 && audios.length === 0) {
-      setNote(
-        blend
-          ? 'Select reference images on the board (or a frame containing them).'
-          : 'Select reference images/videos/audio on the board (or a frame containing them).',
-      );
-      return;
+      return blend
+        ? 'Add reference images to the basket first — select on the board, then press Add.'
+        : 'Add references to a basket first — select on the board, then press Add.';
     }
     if (!prompt.trim()) {
-      setNote(
-        blend
-          ? 'Describe the shot — the references are blended into it.'
-          : 'Describe the shot. Name your references (by their board title) to place them.',
-      );
+      return blend
+        ? 'Describe the shot — the references are blended into it.'
+        : 'Describe the shot. Name your references (by their board title) to place them.';
+    }
+    return null;
+  })();
+
+  const onGenerate = () => {
+    setNote(null);
+    if (blockReason) {
+      setNote(blockReason);
       return;
     }
     const input = buildInput(fields, values);
@@ -312,7 +322,13 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
             <button type="button" className="secondary" onClick={onSaveCard}>
               Save as settings card
             </button>
-            <button type="button" className="primary" onClick={onGenerate}>
+            <button
+              type="button"
+              className="primary"
+              onClick={onGenerate}
+              disabled={Boolean(blockReason)}
+              title={blockReason ?? undefined}
+            >
               Generate video
             </button>
           </div>
