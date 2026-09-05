@@ -233,11 +233,31 @@ describe('pickArchiveVideo — Fal minimum dimensions', () => {
     expect('name' in r && r.name).not.toBe('x_512kb.mp4');
   });
 
-  it('takes the smallest file that clears the minimum on both axes', () => {
-    // The .ogv is smaller than the .mp4 but 304 high — only just over on one
-    // axis and under on neither, so it legitimately wins on size.
+  it('prefers the mp4 over a smaller .ogv, which Safari cannot play at all', () => {
+    // The .ogv is 11 MB smaller and clears the minimum, so a pure size rule
+    // picks it — and every Safari viewer then sees a blank embed.
     const r = pickArchiveVideo('x', mixed);
-    expect(r).toMatchObject({ name: 'x.ogv', width: 400, height: 304, belowMinimum: false });
+    expect(r).toMatchObject({ name: 'x.mp4', width: 640, height: 480, belowMinimum: false });
+  });
+
+  it('still prefers the smaller file when the containers are equally playable', () => {
+    const r = pickArchiveVideo('x', {
+      files: [
+        { name: 'big.mp4', size: '900', width: '1920', height: '1080' },
+        { name: 'small.mp4', size: '100', width: '640', height: '480' },
+      ],
+    });
+    expect(r).toMatchObject({ name: 'small.mp4' });
+  });
+
+  it('falls back to an .ogv when it is the only thing big enough', () => {
+    const r = pickArchiveVideo('x', {
+      files: [
+        { name: 'only.ogv', size: '100', width: '400', height: '304' },
+        { name: 'tiny.mp4', size: '10', width: '320', height: '240' },
+      ],
+    });
+    expect(r).toMatchObject({ name: 'only.ogv', belowMinimum: false });
   });
 
   it('rejects a file that clears one axis but not the other', () => {
