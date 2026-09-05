@@ -102,13 +102,14 @@ describe('archiveMetadataUrl', () => {
 
 describe('pickArchiveVideo', () => {
   // Shaped like the real response for 201932_Computer-Made_Movies: a 1.6 GB
-  // master, a 55 MB derivative of the same film, and non-video clutter.
+  // master, a 55 MB derivative of the same film, and non-video clutter. Both
+  // videos clear the Fal minimum, so size alone decides.
   const meta: ArchiveMetadata = {
     files: [
       { name: 'item.thumbs/frame_000001.jpg', format: 'Thumbnail', size: '45955' },
       { name: 'item_archive.torrent', format: 'Archive BitTorrent', size: '33727' },
-      { name: 'item_master.H.264.ia.mp4', format: 'h.264 IA', size: '55352522' },
-      { name: 'item_master.H.264.mp4', format: 'MPEG4', size: '1597740802' },
+      { name: 'item_master.H.264.ia.mp4', format: 'h.264 IA', size: '55352522', width: '640', height: '480' },
+      { name: 'item_master.H.264.mp4', format: 'MPEG4', size: '1597740802', width: '2048', height: '1536' },
       { name: 'item_meta.xml', format: 'Metadata' },
     ],
   };
@@ -211,5 +212,77 @@ describe('formatBytes', () => {
   it('returns null when the size is unknown', () => {
     expect(formatBytes(null)).toBeNull();
     expect(formatBytes(0)).toBeNull();
+  });
+});
+
+describe('pickArchiveVideo — Fal minimum dimensions', () => {
+  // The real shape of stripper_variety_girls, and the case that broke a whole
+  // board: the smallest playable file is 320x240, which Fal rejects, while a
+  // 640x480 h.264 sits right next to it only 13 MB larger.
+  const mixed: ArchiveMetadata = {
+    files: [
+      { name: 'x.mp4', format: 'h.264', size: '43948684', width: '640', height: '480' },
+      { name: 'x.ogv', format: 'Ogg Video', size: '32231163', width: '400', height: '304' },
+      { name: 'x_512kb.mp4', format: '512Kb MPEG4', size: '30708689', width: '320', height: '240' },
+      { name: 'x_edit.mp4', format: 'HiRes MPEG4', size: '219590327', width: '320', height: '240' },
+    ],
+  };
+
+  it('skips the smallest file when it is below the Fal minimum', () => {
+    const r = pickArchiveVideo('x', mixed);
+    expect('name' in r && r.name).not.toBe('x_512kb.mp4');
+  });
+
+  it('takes the smallest file that clears the minimum on both axes', () => {
+    // The .ogv is smaller than the .mp4 but 304 high — only just over on one
+    // axis and under on neither, so it legitimately wins on size.
+    const r = pickArchiveVideo('x', mixed);
+    expect(r).toMatchObject({ name: 'x.ogv', width: 400, height: 304, belowMinimum: false });
+  });
+
+  it('rejects a file that clears one axis but not the other', () => {
+    const r = pickArchiveVideo('x', {
+      files: [
+        { name: 'wide.mp4', size: '10', width: '1920', height: '200' },
+        { name: 'ok.mp4', size: '999', width: '640', height: '480' },
+      ],
+    });
+    expect(r).toMatchObject({ name: 'ok.mp4', belowMinimum: false });
+  });
+
+  it('flags belowMinimum and takes the largest when nothing clears it', () => {
+    const r = pickArchiveVideo('x', {
+      files: [
+        { name: 'tiny.mp4', size: '10', width: '160', height: '120' },
+        { name: 'less-tiny.mp4', size: '20', width: '320', height: '240' },
+      ],
+    });
+    expect(r).toMatchObject({ name: 'less-tiny.mp4', belowMinimum: true });
+  });
+
+  it('falls back to smallest, claiming nothing, when no dimensions are published', () => {
+    const r = pickArchiveVideo('x', {
+      files: [
+        { name: 'a.mp4', size: '500' },
+        { name: 'b.mp4', size: '100' },
+      ],
+    });
+    expect(r).toMatchObject({ name: 'b.mp4', width: null, height: null, belowMinimum: false });
+  });
+
+  it('prefers a measured, big-enough file over a smaller unmeasured one', () => {
+    const r = pickArchiveVideo('x', {
+      files: [
+        { name: 'unknown.mp4', size: '100' },
+        { name: 'known.mp4', size: '900', width: '640', height: '480' },
+      ],
+    });
+    expect(r).toMatchObject({ name: 'known.mp4' });
+  });
+
+  it('exposes the dimensions it chose on', () => {
+    const r = pickArchiveVideo('x', mixed);
+    expect('width' in r && typeof r.width).toBe('number');
+    expect('height' in r && typeof r.height).toBe('number');
   });
 });
