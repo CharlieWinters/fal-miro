@@ -9,6 +9,7 @@ import {
   replaceImageContent,
   resolveAbsolutePosition,
 } from '../../../shared/boardHelpers';
+import { describeFalError } from '../../../shared/falError';
 import {
   addActiveJob,
   removeActiveJob,
@@ -84,7 +85,7 @@ export async function run(payload: unknown, requestId = ''): Promise<FfmpegMerge
   } catch (err) {
     await replaceImageContent(
       placeholderId,
-      makePlaceholderDataUrl(ratio, 'Failed to start'),
+      makePlaceholderDataUrl(ratio, 'Failed to start', describeFalError(err)),
       'Fal · Failed',
       { x: targetX, y: targetY },
     );
@@ -134,7 +135,7 @@ export async function run(payload: unknown, requestId = ''): Promise<FfmpegMerge
     }
     await replaceImageContent(
       placeholderId,
-      makePlaceholderDataUrl(ratio, 'Failed'),
+      makePlaceholderDataUrl(ratio, 'Failed', describeFalError(err)),
       'Fal · Failed',
       { x: targetX, y: targetY },
     );

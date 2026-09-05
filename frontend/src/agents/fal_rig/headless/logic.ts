@@ -9,6 +9,7 @@ import {
   replaceImageContent,
   resolveAbsolutePosition,
 } from '../../../shared/boardHelpers';
+import { describeFalError } from '../../../shared/falError';
 import {
   addActiveJob,
   removeActiveJob,
@@ -84,7 +85,7 @@ export async function run(payload: unknown, requestId = ''): Promise<RigResult> 
       finalInput.model_url = remeshedUrl;
       remeshCost = await estimateCostUSD(REMESH_ENDPOINT, { units: 1 });
     } catch (err) {
-      await replaceImageContent(placeholderId, makePlaceholderDataUrl(ratio, 'Remesh failed'), 'Fal · Failed', {
+      await replaceImageContent(placeholderId, makePlaceholderDataUrl(ratio, 'Remesh failed', describeFalError(err)), 'Fal · Failed', {
         x: targetX,
         y: targetY,
       });
@@ -98,7 +99,7 @@ export async function run(payload: unknown, requestId = ''): Promise<RigResult> 
     const created = await api.run({ endpointId, input: finalInput });
     falRequestId = created.requestId;
   } catch (err) {
-    await replaceImageContent(placeholderId, makePlaceholderDataUrl(ratio, 'Failed to start'), 'Fal · Failed', {
+    await replaceImageContent(placeholderId, makePlaceholderDataUrl(ratio, 'Failed to start', describeFalError(err)), 'Fal · Failed', {
       x: targetX,
       y: targetY,
     });
@@ -144,7 +145,7 @@ export async function run(payload: unknown, requestId = ''): Promise<RigResult> 
       });
       throw err;
     }
-    await replaceImageContent(placeholderId, makePlaceholderDataUrl(ratio, 'Failed'), 'Fal · Failed', {
+    await replaceImageContent(placeholderId, makePlaceholderDataUrl(ratio, 'Failed', describeFalError(err)), 'Fal · Failed', {
       x: targetX,
       y: targetY,
     });
