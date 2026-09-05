@@ -171,6 +171,12 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
       return;
     }
     const input = buildInput(fields, values);
+    // The prompt basket owns this field: SchemaForm is told to hide it (see
+    // `hide` below), so `values` never carries a prompt and buildInput can't
+    // find one. Inject the assembled value — notes in basket order, then the
+    // typed text — the same way ImageGenScreen and GenericModelScreen do.
+    // Without this the agent receives no prompt at all and throws.
+    if (prompt.trim()) input.prompt = prompt;
     startAgentJob({
       agentId: 'fal_video_gen',
       label: `${model.label} · video`,
@@ -200,6 +206,9 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
   const onSaveCard = async () => {
     setNote(null);
     const input = buildInput(fields, values);
+    // Same reason as onGenerate — the basket owns the prompt, so the card has
+    // to record the assembled value or reopening it comes back with none.
+    if (prompt.trim()) input.prompt = prompt;
 
     const recipe: RecipeCard = {
       v: RECIPE_CARD_VERSION,
