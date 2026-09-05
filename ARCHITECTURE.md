@@ -251,9 +251,9 @@ not through `pipelineApps.ts`.
 
 ### Flavor 3 — no-model apps (local compositing, asset libraries)
 
-Apps that produce board content with **no Fal call at all** — they work with
-no backend configured and spend no credits. One is built: Pattern Fill (local
-image compositing).
+Apps that produce board content with **no Fal call at all** — they spend no
+credits. Two are built: Pattern Fill (local image compositing) and Add Video
+from URL (references an existing video as a board embed).
 
 An earlier Flavor-3 app, Fashion Sketches (a PLM-style asset library shipping
 technical flats as bundled PNGs), was cut before the repo went public. It is
@@ -321,6 +321,47 @@ resolvers now say in their doc comments which job each is for.
 `/proxy`, for images Miro won't hand over bytes for — that's the only path
 here that touches a backend, and it reports *that* rather than echoing a URL
 when both fail.
+
+#### Add Video from URL (`apps/add-video-from-url/`)
+
+Puts a video that already exists somewhere onto the board, so the video
+screens — Sound, Merge Videos, Merge Audio + Video, Video → Image — can take
+it as input.
+
+The app exists because of a gap outside this repo: **Miro has no video
+upload**, not in the Web SDK and not in the REST API. The only way video
+reaches a board is the embed + `embed-video.html` player trick that generated
+output already uses, so this app reuses it verbatim — it calls the same
+`videoEmbedUrl()` a finished generation calls. That's what makes the result
+indistinguishable downstream: `unwrapVideoEmbedUrl()` reads the URL straight
+back out, and every consumer screen treats it as a Fal video.
+
+Two consequences worth knowing:
+
+- **The video is referenced, not copied.** Whoever hosts it keeps serving it,
+  to two different clients: the viewer's browser (to play the embed) and Fal's
+  servers (to read `video_url`). A URL behind a cookie or a signed session
+  will play for you and fail for Fal.
+- **Length is the usual disappointment.** Most Fal video-input models cap well
+  below a full-length source clip, so the screen probes duration in the
+  browser and warns before anything is spent. Frame capture is exempt — it
+  reads one frame at any length.
+
+`videoUrl.ts` holds the parsing, kept apart from the screen because that's
+where the hostile input is: a pasted string ends up in an iframe `src`, so
+anything that isn't `http(s)` is refused there rather than filtered
+downstream, and one of our own player URLs pasted back in is unwrapped instead
+of wrapped twice.
+
+It also resolves an `archive.org/details/<id>` page URL — an HTML page, not a
+video — to a playable file, picking the **smallest** playable file in the
+item. Those items routinely carry a preservation master beside a small
+derivative of the same content (a 1.6 GB MPEG4 next to a 55 MB h.264), and the
+derivative is the one a board wants; anyone needing the master can paste its
+download URL directly. The item metadata endpoint sends
+`Access-Control-Allow-Origin: *`, so that lookup needs no backend of ours and
+the app stays Flavor 3.
+
 
 ## What's NOT built yet (next milestones)
 

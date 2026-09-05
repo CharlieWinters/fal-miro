@@ -14,6 +14,7 @@ import { SketchToTryOnScreen } from '../apps/sketch-to-tryon/Screen';
 import { MaskCreatorScreen } from '../apps/mask-creator/Screen';
 import { NanoBananaPatternScreen } from '../apps/nano-banana-pattern/Screen';
 import { PatternFillScreen } from '../apps/pattern-fill/Screen';
+import { AddVideoFromUrlScreen } from '../apps/add-video-from-url/Screen';
 import { ActiveJobsTray } from './ActiveJobsTray';
 import { CreditsBadge } from './CreditsBadge';
 import {
@@ -264,6 +265,8 @@ function App() {
           <NanoBananaPatternScreen />
         ) : openApp === 'pattern-fill' ? (
           <PatternFillScreen />
+        ) : openApp === 'add-video-from-url' ? (
+          <AddVideoFromUrlScreen />
         ) : model ? (
           <ModelScreen model={model} seed={recipeSeed} />
         ) : family ? (
