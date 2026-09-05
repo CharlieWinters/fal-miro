@@ -117,6 +117,21 @@ function numberField(raw: unknown): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+/**
+ * How widely a container plays, lower being better. Size is the tie-break, not
+ * the first sort: archive.org pairs a 640x480 h.264 .mp4 with a smaller
+ * 400x304 .ogv, and both clear Fal's minimum — but Safari plays no Ogg at all,
+ * so choosing the smaller file there produces an embed that is simply blank
+ * for every Safari viewer on the board. A quarter more bytes is the cheaper
+ * price.
+ */
+function containerRank(name: string): number {
+  const n = name.toLowerCase();
+  if (n.endsWith('.mp4') || n.endsWith('.m4v')) return 0;
+  if (n.endsWith('.mov') || n.endsWith('.webm')) return 1;
+  return 2; // .ogv / .ogg — no Safari support
+}
+
 /** Encode per path segment — a file name may contain slashes (derivative
  *  folders like `<id>.thumbs/frame.jpg`), and those must stay slashes. */
 function downloadUrl(identifier: string, name: string): string {
@@ -157,7 +172,9 @@ export function pickArchiveVideo(
 
   // Unsized files sort last: an unknown size can't be compared, and every item
   // that has a derivative reports its size.
-  const bySize = [...candidates].sort((a, b) => (a.bytes ?? Infinity) - (b.bytes ?? Infinity));
+  const bySize = [...candidates].sort(
+    (a, b) => containerRank(a.name) - containerRank(b.name) || (a.bytes ?? Infinity) - (b.bytes ?? Infinity),
+  );
   const measured = candidates.filter((f) => f.width !== null && f.height !== null);
   const bigEnough = bySize.filter(
     (f) =>
