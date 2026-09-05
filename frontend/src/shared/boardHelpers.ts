@@ -50,24 +50,115 @@ export function parseRatio(ratio: string, maxDim = 720): { width: number; height
   return { width: Math.round(w * scale), height: Math.round(h * scale) };
 }
 
-/** A tiny inline SVG placeholder data-URI sized to the requested ratio. */
-export function makePlaceholderDataUrl(ratio: string, label = 'Generating…'): string {
+/** XML-escape text before it goes into the SVG. Error messages are why this
+ *  matters: they are upstream text that can contain &, <, or a quote, any one
+ *  of which corrupts the document so the board renders nothing at all. */
+function escapeXml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+/**
+ * Greedy word wrap for placeholder text. SVG has no auto-wrap, so the line
+ * breaks have to be decided here. A single token longer than the line (a URL
+ * inside an error) is hard-split rather than allowed to overflow the card, and
+ * anything past `maxLines` is dropped with an ellipsis — the placeholder is a
+ * signpost, not a log viewer.
+ */
+export function wrapPlaceholderText(text: string, maxChars: number, maxLines: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = '';
+  const flush = () => {
+    if (current) {
+      lines.push(current);
+      current = '';
+    }
+  };
+
+  for (const word of words) {
+    let rest = word;
+    while (rest.length > maxChars && lines.length <= maxLines) {
+      flush();
+      lines.push(`${rest.slice(0, maxChars - 1)}-`);
+      rest = rest.slice(maxChars - 1);
+    }
+    if (!rest) continue;
+    if (!current) current = rest;
+    else if (current.length + 1 + rest.length <= maxChars) current += ` ${rest}`;
+    else {
+      flush();
+      current = rest;
+    }
+  }
+  flush();
+
+  if (lines.length <= maxLines) return lines;
+  const kept = lines.slice(0, maxLines);
+  const last = kept[maxLines - 1];
+  kept[maxLines - 1] = `${last.length > maxChars - 1 ? last.slice(0, maxChars - 1) : last}…`;
+  return kept;
+}
+
+/** How much of a failure message the card shows before truncating. */
+const MAX_DETAIL_LINES = 5;
+
+/**
+ * A tiny inline SVG placeholder data-URI sized to the requested ratio.
+ *
+ * `detail` is what makes a failure placeholder worth looking at. Without it a
+ * failed generation is a card reading "Failed", while the actual cause — which
+ * Fal usually states precisely, e.g. "video_urls.0: Video dimensions are too
+ * small. Minimum dimensions are 300x300 pixels. Found 320x240 pixels." — is
+ * only visible in the network tab. Pass `describeFalError(err)` from
+ * shared/falError.ts, which reads the same in both connection modes.
+ */
+export function makePlaceholderDataUrl(ratio: string, label = 'Generating…', detail?: string): string {
   const { width, height } = parseRatio(ratio, 1024);
   // Dark card matching the redesign: near-black fill, hairline border, yellow
   // label, and a thin accent bar suggesting progress.
   const min = Math.min(width, height);
+  const labelSize = Math.round(min / 16);
+  const detailSize = Math.round(min / 34);
+  // ~0.55em average glyph width for this family, with 8% padding each side.
+  const maxChars = Math.max(16, Math.floor((width * 0.84) / (detailSize * 0.55)));
+  const lines = detail ? wrapPlaceholderText(detail, maxChars, MAX_DETAIL_LINES) : [];
+
   const barW = Math.round(width * 0.4);
   const barX = Math.round((width - barW) / 2);
   const barY = Math.round(height * 0.62);
+  const lineStep = Math.round(detailSize * 1.45);
+  const detailTop = Math.round(height * 0.46);
+
+  // With a message to show, the label moves up to make room and the progress
+  // bar goes away — there is no progress left to suggest.
+  const body = lines.length
+    ? `<text x="50%" y="38%" fill="#FFDD33" font-size="${labelSize}" font-weight="700">${escapeXml(label)}</text>
+    ${lines
+      .map(
+        (line, i) =>
+          `<text x="50%" y="${detailTop + i * lineStep}" fill="#C9C9D1" font-size="${detailSize}">${escapeXml(line)}</text>`,
+      )
+      .join('\n    ')}`
+    : `<text x="50%" y="46%" fill="#FFDD33" font-size="${labelSize}" font-weight="700">${escapeXml(label)}</text>
+    <text x="50%" y="53%" fill="#8a8a92" font-size="${Math.round(min / 30)}">${width} × ${height}</text>`;
+
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
   <rect width="100%" height="100%" rx="14" fill="#141417"/>
   <rect x="1" y="1" width="${width - 2}" height="${height - 2}" rx="13" fill="none" stroke="#FFDD33" stroke-opacity="0.35" stroke-width="2"/>
   <g font-family="'Roobert PRO', system-ui, sans-serif" text-anchor="middle">
-    <text x="50%" y="46%" fill="#FFDD33" font-size="${Math.round(min / 16)}" font-weight="700">${label}</text>
-    <text x="50%" y="53%" fill="#8a8a92" font-size="${Math.round(min / 30)}">${width} × ${height}</text>
-  </g>
-  <rect x="${barX}" y="${barY}" width="${barW}" height="4" rx="2" fill="#FFDD33" fill-opacity="0.5"/>
+    ${body}
+  </g>${
+    lines.length
+      ? ''
+      : `
+  <rect x="${barX}" y="${barY}" width="${barW}" height="4" rx="2" fill="#FFDD33" fill-opacity="0.5"/>`
+  }
 </svg>`;
   // btoa is Latin1-only; the default label contains "…" (U+2026) so UTF-8 encode first.
   const bytes = new TextEncoder().encode(svg);
