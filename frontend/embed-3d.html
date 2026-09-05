@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Fal for Miro — 3D</title>
   <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js" integrity="sha384-Ftcjj/GNLxPvzNDftO/oryXB9aGxsGZY9JGqsXG0uUKgQDl9RfDgsx9NJ/4IVNPe" crossorigin="anonymous"></script>
   <style>
@@ -21,6 +22,25 @@
       document.getElementById('viewer').src = url;
     } else {
       document.body.textContent = 'Missing or invalid url';
+    }
+  </script>
+  <script>
+    // Swallow the browser's page-zoom gesture.
+    //
+    // A trackpad pinch arrives as wheel + ctrlKey (Safari also fires gesture*
+    // events). On the board, Miro's canvas listens for that and turns it into
+    // board zoom — but this page is a CROSS-ORIGIN iframe, so those events go
+    // to this document and Miro never sees them. Nothing calls preventDefault,
+    // the browser's default action runs, and it zooms the whole top-level
+    // miro.com page. What that looks like to the user is the board's zoom
+    // breaking whenever they pinch over a video.
+    //
+    // Only the zoom gesture is swallowed. Plain wheel is deliberately left
+    // alone so it still reaches whatever this page renders (model-viewer's
+    // camera zoom on the 3D pages) — the board can't receive it either way.
+    addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+    for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+      addEventListener(type, (e) => e.preventDefault());
     }
   </script>
 </body>
