@@ -188,9 +188,19 @@ see [SECURITY.md](SECURITY.md). If you're deploying this somewhere other people
 can reach, read that file's threat model first: `BACKEND_KEY` is a gate, not a
 secret.
 
-## Licence
+## Licence and credit
 
-[MIT](LICENSE) © Sean Winters.
+[Apache-2.0](LICENSE) © Sean Winters.
 
-Provider logos and the CDN-loaded viewer libraries are not covered by that
-licence — see [NOTICE](NOTICE).
+**Please use this.** Fork it, change it, ship it, sell it — that's what the
+licence is for, and no permission is needed.
+
+The one ask: keep the attribution. Apache-2.0 section 4(d) requires that if you
+redistribute this or a derivative, the notice in [NOTICE](NOTICE) travels with
+it — in your own NOTICE file, in your documentation, or in a credits screen in
+your product. Any of the three is fine.
+
+If you build something interesting on top, I'd genuinely like to hear about it.
+
+Provider logos and the CDN-loaded viewer libraries are not covered by this
+licence and belong to their owners — also in [NOTICE](NOTICE).

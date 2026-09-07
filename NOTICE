@@ -1,3 +1,19 @@
+Fal for Miro
+Copyright 2026 Sean Winters
+https://github.com/CharlieWinters/fal-miro
+
+This product includes software developed by Sean Winters.
+
+Licensed under the Apache License, Version 2.0. If you redistribute this
+software or a derivative of it, Apache-2.0 section 4(d) requires you to carry
+the attribution above with it -- in a NOTICE file, in your documentation, or in
+a credits display in your product.
+
+You are welcome to use, change and ship this, commercially or otherwise. The
+only ask is that the line above travels with it.
+
+-------------------------------------------------------------------------------
+
 # Third-party notices
 
 ## Provider logos
@@ -8,7 +24,7 @@ Tencent, Black Forest Labs, Stability AI, Ideogram, Luma, Kling, Lightricks,
 Meshy, Bria, ElevenLabs, Veed, xAI and fal.ai among them.
 
 They are used solely to identify each provider in the model picker. They are
-**not** covered by this project's MIT licence, are not the project's to
+**not** covered by this project's Apache-2.0 licence, are not the project's to
 sublicense, and remain the property of their respective owners. No affiliation
 with or endorsement by any of them is claimed.
 

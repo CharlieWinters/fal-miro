@@ -275,6 +275,25 @@ export function SettingsScreen({ forceBackendSetup, onBackendConfigured }: Setti
           {note && <div className="notice">{note}</div>}
         </>
       )}
+
+      {/* Attribution, shown on every tab rather than tucked behind an About
+          screen. This is the credit NOTICE asks a fork to carry (Apache-2.0
+          §4(d)) — keeping it visible in the shipped app is what makes removing
+          it a deliberate act rather than an oversight. */}
+      <div className="app-credit">
+        <span>
+          Fal for Miro — by{' '}
+          <a
+            className="doc-link"
+            href="https://github.com/CharlieWinters/fal-miro"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            Sean Winters
+          </a>
+        </span>
+        <span className="app-credit-licence">Apache-2.0 · open source</span>
+      </div>
     </div>
   );
 }
