@@ -267,7 +267,12 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
       const missing = viewFields.find((f) => f.required && !views[f.name]);
       if (missing) return `Assign an image to the required "${missing.label}" view.`;
     }
-    if (!fullPrompt.trim() && !imagePrimary && !videoPrimary) {
+    // Only demand a prompt when there is somewhere to type one. A model with no
+    // `prompt` field renders no prompt basket (see hasPromptField below), so
+    // asking for one is a dead end -- the button can never be enabled. Same for
+    // multiView: the required view slot *is* the primary input, exactly as
+    // imagePrimary is for the single-image models.
+    if (hasPromptField && !multiView && !fullPrompt.trim() && !imagePrimary && !videoPrimary) {
       return 'Type a prompt, or add sticky notes to the prompt basket.';
     }
     return null;
