@@ -16,14 +16,14 @@
   "dependencies": {
     "@fal-ai/client": "^1.10.1",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
+    "react-dom": "^19.2.8",
     "three": "^0.160.1"
   },
   "devDependencies": {
     "@mirohq/websdk-types": "^2.17.2",
     "@types/node": "^22.5.0",
     "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
+    "@types/react-dom": "^19.2.7",
     "@types/three": "^0.160.0",
     "@vitejs/plugin-react": "^6.1.1",
     "dependency-cruiser": "^18.2.0",
