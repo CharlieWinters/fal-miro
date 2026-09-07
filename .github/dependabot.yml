@@ -8,6 +8,14 @@ updates:
       # One PR for the routine churn; anything major still comes through alone.
       minor-and-patch:
         update-types: [minor, patch]
+        # three.js is pre-1.0, so semver calls its releases minor while it
+        # removes APIs across them freely -- 0.160 -> 0.185 arrived in the
+        # "routine" group and broke the build, because TransformControls
+        # stopped extending Object3D around r169. Anything pinned below 1.0
+        # belongs in its own PR where it gets read.
+        exclude-patterns:
+          - three
+          - "@types/three"
 
   - package-ecosystem: npm
     directory: /backend
