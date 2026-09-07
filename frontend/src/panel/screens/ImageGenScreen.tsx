@@ -503,16 +503,20 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
             commonOrder={COMMON_ARGS[model.capability]}
             values={values}
             onChange={onChange}
-            hide={
-              multiView
+            hide={[
+              ...(multiView
                 ? viewFields.map((f) => f.name)
                 : [
                     ...((takesSingle || takesMulti) && referenceField ? [referenceField.name] : []),
                     ...((takesSingleVideo || takesMultiVideo) && videoReferenceField ? [videoReferenceField.name] : []),
-                    // The prompt basket owns this field entirely.
-                    ...(hasPromptField ? ['prompt'] : []),
-                  ]
-            }
+                  ]),
+              // The prompt basket owns this field entirely, multiView or not.
+              // Left inside the non-multiView branch, a multiView model with a
+              // prompt would render it twice — once as the basket, once dropped
+              // into Advanced, since model3d's COMMON_ARGS doesn't surface
+              // `prompt` up-front — and the basket would silently win.
+              ...(hasPromptField ? ['prompt'] : []),
+            ]}
           />
 
           {usesImageAgent && hasPromptField && (
