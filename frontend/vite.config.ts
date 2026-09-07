@@ -9,7 +9,7 @@ const htmlEntries = fs
   .readdirSync('.')
   .filter((file) => path.extname(file) === '.html')
   .reduce((acc: Record<string, string>, file) => {
-    acc[path.basename(file, '.html')] = path.resolve(__dirname, file);
+    acc[path.basename(file, '.html')] = path.resolve(import.meta.dirname, file);
     return acc;
   }, {});
 
