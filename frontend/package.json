@@ -20,19 +20,20 @@
     "three": "^0.160.1"
   },
   "devDependencies": {
-    "@mirohq/websdk-types": "latest",
+    "@mirohq/websdk-types": "^2.17.2",
     "@types/node": "^22.5.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@types/three": "^0.160.0",
-    "@vitejs/plugin-react": "^4.2.1",
+    "@vitejs/plugin-react": "^6.1.1",
     "dependency-cruiser": "^18.2.0",
     "jsdom": "^29.1.1",
     "typescript": "^5.4.5",
-    "vite": "^5.2.0",
-    "vitest": "^3.2.6"
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
   },
   "engines": {
-    "node": ">=22"
-  }
+    "node": ">=22.12"
+  },
+  "type": "module"
 }
