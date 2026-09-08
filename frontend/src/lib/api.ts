@@ -312,29 +312,52 @@ function frontendPageUrl(page: string): string {
   return `${window.location.origin}${import.meta.env.BASE_URL}${page}`;
 }
 
+/**
+ * Build one of our embed-page URLs, with a one-shot cache-buster.
+ *
+ * Miro resolves an embed URL once and caches the outcome against that exact
+ * URL. If the first resolution fails — a timeout, a cold start, a blip — the
+ * *failure* is what sticks: the board shows a grey placeholder instead of the
+ * viewer, with no error, nothing to click and no way to retry. Re-creating the
+ * item at the same URL changes nothing, because Miro never asks again.
+ *
+ * Seen live on 8 Sep 2026: two embed-rig.html embeds stuck on the placeholder
+ * while an embed-3d.html on the same origin rendered fine. Identical `mode`
+ * and options; the only difference was which URLs Miro had already resolved.
+ * Re-creating them with a fresh `cb` made both render immediately.
+ *
+ * So every embed we create carries a value Miro has never seen, which costs
+ * nothing and removes the failure mode. The unwrap* helpers below read `url`
+ * through `searchParams`, so the extra parameter is invisible to them.
+ */
+function embedPageUrl(page: string, assetUrl: string): string {
+  const cb = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  return `${frontendPageUrl(page)}?url=${encodeURIComponent(assetUrl)}&cb=${cb}`;
+}
+
 /** URL to the static page that wraps a Fal video URL in an iframable player. */
 export function videoEmbedUrl(videoUrl: string): string {
-  return `${frontendPageUrl('embed-video.html')}?url=${encodeURIComponent(videoUrl)}`;
+  return embedPageUrl('embed-video.html', videoUrl);
 }
 
 /** URL to the static page that renders a Fal .glb in an orbit-able viewer. */
 export function model3dEmbedUrl(glbUrl: string): string {
-  return `${frontendPageUrl('embed-3d.html')}?url=${encodeURIComponent(glbUrl)}`;
+  return embedPageUrl('embed-3d.html', glbUrl);
 }
 
 /** URL to the static page that plays a Fal audio URL in an <audio> player. */
 export function audioEmbedUrl(audioUrl: string): string {
-  return `${frontendPageUrl('embed-audio.html')}?url=${encodeURIComponent(audioUrl)}`;
+  return embedPageUrl('embed-audio.html', audioUrl);
 }
 
 /** URL to the static page that renders an equirectangular image as a 360° photosphere. */
 export function panoramaEmbedUrl(imageUrl: string): string {
-  return `${frontendPageUrl('embed-panorama.html')}?url=${encodeURIComponent(imageUrl)}`;
+  return embedPageUrl('embed-panorama.html', imageUrl);
 }
 
 /** URL to the static page that plays a rigged/animated .glb character. */
 export function rigEmbedUrl(glbUrl: string): string {
-  return `${frontendPageUrl('embed-rig.html')}?url=${encodeURIComponent(glbUrl)}`;
+  return embedPageUrl('embed-rig.html', glbUrl);
 }
 
 /**
