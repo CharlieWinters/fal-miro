@@ -528,6 +528,25 @@ export function HomeScreen({
               </div>
             )}
 
+            {browseMode === 'apps' && onOpenApp && (
+              <div
+                className="tile"
+                role="button"
+                tabIndex={0}
+                onClick={() => onOpenApp('add-video-from-url')}
+                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onOpenApp('add-video-from-url')}
+              >
+                <span
+                  className="tile-icon"
+                  style={{ background: toneFill(toneOf('video')), border: `1px solid ${toneOutline(toneOf('video'))}` }}
+                >
+                  <CapabilityIcon capability="video" color={toneOf('video')} size={18} />
+                </span>
+                <span className="tile-label">Add Video from URL</span>
+                <span className="tile-count">app · no credits</span>
+              </div>
+            )}
+
             {browseMode === 'apps' && (
               <div
                 className="tile"
