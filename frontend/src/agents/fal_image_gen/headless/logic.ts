@@ -150,7 +150,7 @@ export async function run(payload: unknown, requestId = ''): Promise<ImageGenRes
 
     if (refs.length) {
       if (referenceField.multiple) {
-        // Order by prompt mention + adapt the prompt (see referenceBinding).
+        // Adapt the prompt to the model, keeping the basket order (see referenceBinding).
         const bound = bindReferences({
           prompt: finalInput.prompt as string,
           refs,

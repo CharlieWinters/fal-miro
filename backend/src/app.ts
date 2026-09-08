@@ -90,7 +90,7 @@ app.get('/healthz', (c) => {
 // (embed-video.html etc.) — verified live that none of them actually need a
 // backend: video/audio/3d/rig play the Fal CDN URL directly, and even
 // panorama's WebGL sky texture loads cross-origin cleanly (Fal's CDN sends
-// Access-Control-Allow-Origin). See frontend/ARCHITECTURE.md.
+// Access-Control-Allow-Origin). See ARCHITECTURE.md, "Embed pages".
 
 // ---------------------------------------------------------------------------
 // CORS proxy — streams a remote asset (a Fal .glb or .mp4) back with an

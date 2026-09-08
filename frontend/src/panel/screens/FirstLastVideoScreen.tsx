@@ -97,9 +97,18 @@ export function FirstLastVideoScreen({ model }: { model: FalModel }) {
             hide={[frameFields.first, frameFields.last]}
           />
 
-          <button type="button" className="primary" onClick={onGenerate}>
+          <button
+            type="button"
+            className="primary"
+            onClick={onGenerate}
+            disabled={!first || !last}
+            title={!first || !last ? 'Set both a first frame and a last frame from the board.' : undefined}
+          >
             Generate video
           </button>
+          {(!first || !last) && (
+            <div className="hint">Set both a first frame and a last frame from the board.</div>
+          )}
         </>
       )}
 

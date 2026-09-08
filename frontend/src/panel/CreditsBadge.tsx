@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, connectionMode } from '../lib/api';
 
 /**
- * Remaining Fal credit balance, shown top-right (like the Runway/11L apps).
+ * Remaining Fal credit balance, shown top-right.
  * In client mode there's no backend to ask (getBalance needs ADMIN_KEY), so
  * this shows a "$?" placeholder with a hover explanation instead of silently
  * failing — with a direct link back to Settings for anyone who wants the

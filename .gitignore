@@ -27,3 +27,6 @@ build/
 .DS_Store
 Thumbs.db
 *.local
+
+# Generated at build time by frontend/scripts/third-party-notices.mjs
+frontend/public/THIRD_PARTY_NOTICES.txt

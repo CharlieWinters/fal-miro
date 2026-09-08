@@ -31,6 +31,14 @@ with or endorsement by any of them is claimed.
 If you own one of these marks and would rather it were not here, open an issue
 and it will be removed.
 
+## Bundled dependencies
+
+The frontend build bundles React, react-dom, three.js, @fal-ai/client and
+their dependencies (MIT, ISC and BSD-2-Clause licences). Their copyright and
+permission notices are generated at build time into
+`THIRD_PARTY_NOTICES.txt`, shipped next to the bundles and linked from the
+app's Settings screen. Run `npm run notices` in `frontend/` to regenerate it.
+
 ## Runtime dependencies loaded from a CDN
 
 The embed pages load two libraries directly from public CDNs rather than

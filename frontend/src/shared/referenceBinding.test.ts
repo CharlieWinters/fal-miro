@@ -166,3 +166,84 @@ describe('bindSeedanceReferences', () => {
     expect(out).toEqual({ image_urls: [], video_urls: [], audio_urls: [], prompt: 'Anything.' });
   });
 });
+
+describe('bindSeedanceReferences — video and audio tokens', () => {
+  const BOAT = { url: 'https://x/boat.png', title: 'boat' };
+  const PLATE = { url: 'https://x/v.mp4', title: 'plate' };
+  const SWELL = { url: 'https://x/a.mp3', title: 'swell' };
+
+  it('rewrites a video title to @VideoN and an audio title to @AudioN', () => {
+    const out = bindSeedanceReferences({
+      prompt: 'The plate loops while the swell rises.',
+      images: [],
+      videos: [PLATE],
+      audios: [SWELL],
+    });
+    expect(out.prompt).toBe('The @Video1 loops while the @Audio1 rises.');
+    expect(out.prompt).toContain('@Video1');
+    expect(out.prompt).toContain('@Audio1');
+    // Each modality gets its own token — a video is never an @Image.
+    expect(out.prompt).not.toMatch(/@Image/);
+    expect(out.prompt).not.toMatch(/@Audio\d+ loops/);
+    expect(out.prompt).not.toMatch(/@Video\d+ rises/);
+  });
+
+  it('numbers each modality independently by its own basket position', () => {
+    const out = bindSeedanceReferences({
+      prompt: 'boat, plate, swell.',
+      images: [BOAT],
+      videos: [PLATE],
+      audios: [SWELL],
+    });
+    // All three are row 1 of their own basket, so all are token 1.
+    expect(out.prompt).toBe('@Image1, @Video1, @Audio1.');
+  });
+
+  it('rewrites every mention of an image title, not just the first', () => {
+    const out = bindSeedanceReferences({
+      prompt: 'The boat drifts. Then the boat turns. Finally the boat sinks.',
+      images: [BOAT],
+    });
+    expect(out.prompt).toBe('The @Image1 drifts. Then the @Image1 turns. Finally the @Image1 sinks.');
+    expect(out.prompt).not.toMatch(/\bboat\b/i);
+  });
+
+  it('rewrites every mention of a video title', () => {
+    const out = bindSeedanceReferences({
+      prompt: 'Match the plate, then cut back to the plate.',
+      images: [],
+      videos: [PLATE],
+    });
+    expect(out.prompt).toBe('Match the @Video1, then cut back to the @Video1.');
+    expect(out.prompt).not.toMatch(/\bplate\b/i);
+  });
+
+  it('rewrites every mention of an audio title', () => {
+    const out = bindSeedanceReferences({
+      prompt: 'Start the swell quietly; the swell peaks at the end.',
+      images: [],
+      audios: [SWELL],
+    });
+    expect(out.prompt).toBe('Start the @Audio1 quietly; the @Audio1 peaks at the end.');
+    expect(out.prompt).not.toMatch(/\bswell\b/i);
+  });
+
+  it('matches titles case-insensitively at every occurrence', () => {
+    const out = bindSeedanceReferences({ prompt: 'Boat. boat. BOAT.', images: [BOAT] });
+    expect(out.prompt).toBe('@Image1. @Image1. @Image1.');
+  });
+});
+
+describe('bindReferences — Kling rewrites every repeated mention', () => {
+  it('replaces all occurrences of each title, in basket order', () => {
+    const out = bindReferences({
+      refs: [HERO, TEX],
+      prompt: 'Take hero-shot, add texture, keep hero-shot sharp, more texture.',
+      multiple: true,
+      endpointId: 'fal-ai/kling-video/v2/pro/image-to-video',
+    });
+    expect(out.prompt).toBe('Take @Image1, add @Image2, keep @Image1 sharp, more @Image2.');
+    expect(out.prompt).not.toMatch(/hero-shot|texture/i);
+    expect(out.urls).toEqual([HERO.url, TEX.url]);
+  });
+});

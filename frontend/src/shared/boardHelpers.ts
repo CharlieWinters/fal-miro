@@ -1,5 +1,5 @@
 // Thin wrappers around the Miro Web SDK shared across agents. Adapted from the
-// Runway integration, trimmed to what the Fal image agent needs.
+// Board helpers shared by the agents and screens.
 
 import { unwrapVideoEmbedUrl, unwrapAudioEmbedUrl } from '../lib/api';
 

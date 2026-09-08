@@ -11,7 +11,8 @@
   "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && npm run notices && vite build",
+    "notices": "node scripts/third-party-notices.mjs",
     "preview": "vite preview",
     "lint": "npm run typecheck && npm run lint:boundaries",
     "typecheck": "tsc --noEmit",

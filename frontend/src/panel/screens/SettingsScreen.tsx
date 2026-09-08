@@ -292,7 +292,17 @@ export function SettingsScreen({ forceBackendSetup, onBackendConfigured }: Setti
             Sean Winters
           </a>
         </span>
-        <span className="app-credit-licence">Apache-2.0 · open source</span>
+        <span className="app-credit-licence">
+          Apache-2.0 · open source ·{' '}
+          <a
+            className="doc-link"
+            href={`${import.meta.env.BASE_URL}THIRD_PARTY_NOTICES.txt`}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            third-party notices
+          </a>
+        </span>
       </div>
     </div>
   );
