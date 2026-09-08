@@ -5,29 +5,19 @@ import {
   type RunAgentMessage,
   type AgentUpdateMessage,
 } from '../shared/messageTypes';
+import { isOurs, postToSiblings } from '../shared/frameMessaging';
 
-const currentOrigin = window.location.origin;
 let listenerAttached = false;
 
-/** Broadcast a progress update back to whichever frames are listening. */
+/** Send a progress update to our own panel/modal frames — and only those
+ * (see shared/frameMessaging: an update carries the output URL). */
 export function broadcastUpdate(update: Omit<AgentUpdateMessage, 'type'>): void {
   const message: AgentUpdateMessage = { type: AGENT_UPDATE, ...update };
-  try {
-    for (let i = 0; i < window.parent.frames.length; i++) {
-      try {
-        window.parent.frames[i].postMessage(message, '*');
-      } catch {
-        /* cross-origin frame, ignore */
-      }
-    }
-    window.parent.postMessage(message, '*');
-  } catch (err) {
-    console.warn('[headless] broadcastUpdate failed:', err);
-  }
+  postToSiblings(message);
 }
 
 const makeHandler = (registry: AgentRegistry) => async (event: MessageEvent) => {
-  if (event.origin !== currentOrigin) return;
+  if (!isOurs(event)) return;
 
   const message = event.data as Partial<RunAgentMessage>;
   if (!message || typeof message !== 'object') return;
