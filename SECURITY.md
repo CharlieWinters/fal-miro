@@ -1,5 +1,9 @@
 # Security policy
 
+An independent, unofficial project. Not affiliated with, endorsed by, or supported by Miro or fal.ai.
+Vulnerabilities in this app are the maintainer's to fix, not Miro's or fal's;
+see "Out of scope" for where to report problems in those platforms.
+
 ## Reporting a vulnerability
 
 Please report security issues privately, **not** as a public GitHub issue.

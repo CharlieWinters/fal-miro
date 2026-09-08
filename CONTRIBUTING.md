@@ -2,7 +2,9 @@
 
 Thanks for taking a look. This is a personal project released so others can
 learn from it and build on it — issues and pull requests are welcome, and so is
-forking it and going your own way.
+forking it and going your own way. It is independent and unofficial: not
+affiliated with, endorsed by, or supported by Miro or fal.ai, and nothing here
+speaks for either company.
 
 ## Getting set up
 

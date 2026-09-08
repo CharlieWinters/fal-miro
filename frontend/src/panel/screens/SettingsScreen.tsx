@@ -292,6 +292,10 @@ export function SettingsScreen({ forceBackendSetup, onBackendConfigured }: Setti
             Sean Winters
           </a>
         </span>
+        <span className="app-credit-disclaimer">
+          Independent, unofficial project — not affiliated with, endorsed by, or supported by Miro or
+          fal.ai.
+        </span>
         <span className="app-credit-licence">
           Apache-2.0 · open source ·{' '}
           <a
