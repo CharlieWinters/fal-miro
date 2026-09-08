@@ -16,6 +16,12 @@ import {
   type GenSettings,
 } from '../../../shared/storage';
 import { broadcastUpdate } from '../../../headless/communications';
+import { POLL_BUDGET, pollStatus as sharedPollStatus, shouldLeaveForResume as isTimeout } from '../../../shared/pollStatus';
+
+// Polling lives in shared/pollStatus; this agent only chooses its budget.
+const pollStatus = (endpointId: string, requestId: string, onTick: (s: StatusResponse) => void) =>
+  sharedPollStatus(endpointId, requestId, onTick, POLL_BUDGET.merge);
+
 
 export type FfmpegMergePayload = {
   endpointId: string;
@@ -166,10 +172,6 @@ export async function run(payload: unknown, requestId = ''): Promise<FfmpegMerge
   throw new Error(`Merge ${final.status}${outputUrl ? '' : ' (no output returned)'}`);
 }
 
-/** A poll timeout (job may still be running) vs. a real failure. */
-function isTimeout(err: unknown): boolean {
-  return err instanceof Error && err.name === 'PollTimeout';
-}
 
 async function estimateCost(endpointId: string, units: number): Promise<number | undefined> {
   try {
@@ -180,23 +182,3 @@ async function estimateCost(endpointId: string, units: number): Promise<number |
   }
 }
 
-async function pollStatus(
-  endpointId: string,
-  requestId: string,
-  onTick: (s: StatusResponse) => void,
-  intervalMs = 4000,
-  timeoutMs = 15 * 60 * 1000,
-): Promise<StatusResponse> {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const s = await api.getStatus(endpointId, requestId);
-    onTick(s);
-    if (s.status === 'SUCCEEDED' || s.status === 'FAILED' || s.status === 'UNKNOWN') {
-      return s;
-    }
-    await new Promise((r) => setTimeout(r, intervalMs));
-  }
-  const err = new Error(`Request ${requestId} timed out after ${timeoutMs / 1000}s`);
-  err.name = 'PollTimeout';
-  throw err;
-}

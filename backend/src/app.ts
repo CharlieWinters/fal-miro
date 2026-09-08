@@ -220,9 +220,31 @@ app.get('/api/fal/status/:requestId', async (c) => {
     const e = err as any;
     console.error('[status] error:', e?.status ?? '', e?.message ?? err);
     if (e?.body?.detail) console.error('[status] validation detail:', JSON.stringify(e.body.detail, null, 2));
+    // Fal reports a request that failed *on its side* (bad inputs, no media
+    // generated, safety block) as a 4xx on the status/result call. That is a
+    // terminal answer about the job, not a problem reaching Fal — so return it
+    // as a status the pollers can finish on, rather than as an HTTP error they
+    // would keep retrying (and re-hitting on every board load) forever.
+    const terminal = terminalStatusFor(e?.status);
+    if (terminal) {
+      return c.json({
+        requestId: c.req.param('requestId'),
+        endpointId: c.req.query('endpointId'),
+        status: terminal,
+        error: falError(err),
+      });
+    }
     return c.json({ error: falError(err) }, 502);
   }
 });
+
+/** Map a Fal status/result HTTP error to a terminal job status, or null if it
+ * is transient (network, 429, 5xx) and worth retrying. */
+export function terminalStatusFor(httpStatus: unknown): 'FAILED' | 'UNKNOWN' | null {
+  if (httpStatus === 400 || httpStatus === 422) return 'FAILED';
+  if (httpStatus === 404) return 'UNKNOWN';
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Cancel an in-flight request.

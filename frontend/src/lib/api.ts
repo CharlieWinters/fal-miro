@@ -121,6 +121,8 @@ export type StatusResponse = {
   endpointId: string;
   status: FalStatus;
   queuePosition?: number | null;
+  /** Why Fal rejected or abandoned the request (present on FAILED). */
+  error?: string;
   /** Best-effort primary output media URLs (present on SUCCEEDED). */
   output?: string[];
   /** Full untouched Fal result payload (present on SUCCEEDED). */
