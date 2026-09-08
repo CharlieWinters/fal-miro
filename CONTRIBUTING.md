@@ -154,6 +154,16 @@ replaced.
 - No secrets in the repo. `FAL_KEY` lives in `backend/.env` and never reaches
   the browser; the frontend only ever holds the proxy key.
 
+## Licensing your contribution
+
+The project is Apache-2.0. By opening a pull request you agree your
+contribution is licensed the same way — there is no CLA to sign.
+
+If you fork rather than contribute, that's equally welcome. Apache-2.0 section
+4(d) asks only that the attribution in [NOTICE](NOTICE) travels with what you
+ship, in a NOTICE file, your docs, or a credits screen. The app itself carries
+that line at the foot of its Settings panel.
+
 ## Reporting security issues
 
 Please don't open a public issue — see [SECURITY.md](SECURITY.md).

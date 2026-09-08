@@ -1,7 +1,13 @@
 {
   "name": "fal-miro-backend",
   "version": "0.1.0",
-  "license": "MIT",
+  "license": "Apache-2.0",
+  "author": "Sean Winters (https://github.com/CharlieWinters)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CharlieWinters/fal-miro.git"
+  },
+  "homepage": "https://github.com/CharlieWinters/fal-miro",
   "private": true,
   "type": "module",
   "scripts": {

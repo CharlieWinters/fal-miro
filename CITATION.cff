@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+title: Fal for Miro
+message: >-
+  If you use this software, or a derivative of it, please carry the attribution
+  below. Apache-2.0 section 4(d) requires it; this file just makes it easy.
+type: software
+authors:
+  - given-names: Sean
+    family-names: Winters
+    alias: CharlieWinters
+repository-code: https://github.com/CharlieWinters/fal-miro
+url: https://github.com/CharlieWinters/fal-miro
+abstract: >-
+  A Miro board app for generating images, video, 3D models and audio with fal.ai
+  models. Pick a model, generate from a prompt or selected board content, and
+  the result drops back onto the board.
+license: Apache-2.0
+date-released: '2026-09-04'
