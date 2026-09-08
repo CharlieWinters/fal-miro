@@ -48,6 +48,13 @@ export function RiggingScreen({ model }: { model: FalModel }) {
   // Preset selection + custom IDs, deduped, capped at Meshy's 10-per-rig limit.
   const allIds = useMemo(() => [...new Set([...ids, ...customIds])].slice(0, 10), [ids, customIds]);
 
+  /** Why Rig can't run yet, or null — shown before the click, not after it. */
+  const blockReason: string | null = !modelUrl || !selected
+    ? 'Select a Fal 3D model on the board (a generated 3D viewer) first.'
+    : allIds.length === 0
+      ? 'Pick at least one animation.'
+      : null;
+
   const onRig = () => {
     setNote(null);
     if (!modelUrl || !selected) {
@@ -158,9 +165,16 @@ export function RiggingScreen({ model }: { model: FalModel }) {
         deformation. Higher polycount preserves more detail (slower). Adds a small cost.
       </div>
 
-      <button type="button" className="primary" onClick={onRig}>
+      <button
+        type="button"
+        className="primary"
+        onClick={onRig}
+        disabled={Boolean(blockReason)}
+        title={blockReason ?? undefined}
+      >
         Rig + Animate
       </button>
+      {blockReason && <div className="hint">{blockReason}</div>}
 
       {note && <div className="notice">{note}</div>}
     </div>

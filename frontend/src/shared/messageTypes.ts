@@ -1,5 +1,4 @@
 // Cross-frame postMessage contract (panel/modal → headless and back).
-// Identical protocol to the Runway / ElevenLabs integrations.
 
 export const RUN_AGENT = 'RUN_AGENT';
 export const AGENT_UPDATE = 'AGENT_UPDATE';

@@ -99,3 +99,39 @@ describe('stripAssetName', () => {
     expect(stripAssetName(text, cfg())).toBe('a red bicycle leaning on a wall');
   });
 });
+
+describe('default pattern — id character set', () => {
+  it.each(['HERO_01', 'CHR-01', 'veh_07-b', 'X1'])('accepts %s as an asset id', (id) => {
+    expect(extractAssetName(`${id}, a knight in a field`, cfg())).toBe(id);
+    expect(stripAssetName(`${id}, a knight in a field`, cfg())).toBe('a knight in a field');
+  });
+
+  it('must start with a letter or digit, not a separator', () => {
+    expect(extractAssetName('_HERO, a knight', cfg())).toBeNull();
+    expect(extractAssetName('-CHR, a knight', cfg())).toBeNull();
+  });
+
+  it('tolerates whitespace around the id and before the comma', () => {
+    expect(extractAssetName('  HERO_01 , a knight', cfg())).toBe('HERO_01');
+    expect(stripAssetName('  HERO_01 , a knight', cfg())).toBe('a knight');
+  });
+});
+
+describe('stripAssetName — leftover separator cleanup', () => {
+  it('strips a doubled comma left after the id', () => {
+    expect(stripAssetName('CHR01,, a knight', cfg())).toBe('a knight');
+  });
+
+  it('strips a leading comma when the pattern itself did not consume it', () => {
+    // A team pattern that captures only the id: the comma is still in the
+    // remainder and must not be sent to the model as ", a knight".
+    const c = cfg({ pattern: '^([A-Z]+\\d+)' });
+    expect(stripAssetName('CHR01, a knight', c)).toBe('a knight');
+    expect(stripAssetName('CHR01 , a knight', c)).toBe('a knight');
+    expect(stripAssetName('CHR01,,  a knight', c)).toBe('a knight');
+  });
+
+  it('does not eat a comma that belongs to the prompt body', () => {
+    expect(stripAssetName('CHR01, a knight, armoured', cfg())).toBe('a knight, armoured');
+  });
+});

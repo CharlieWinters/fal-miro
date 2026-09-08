@@ -1,4 +1,5 @@
 import { api, videoEmbedUrl, model3dEmbedUrl, panoramaEmbedUrl, rigEmbedUrl, type StatusResponse } from '../../../lib/api';
+import { POLL_BUDGET, isTerminal, pollStatus, shouldLeaveForResume } from '../../../shared/pollStatus';
 import {
   createEmbedAtPosition,
   deleteItem,
@@ -52,8 +53,14 @@ export async function run(_payload: unknown): Promise<{ resumed: number; finaliz
   return { resumed: jobs.length, finalized };
 }
 
-function isTerminal(status: StatusResponse['status']): boolean {
-  return status === 'SUCCEEDED' || status === 'FAILED' || status === 'UNKNOWN';
+/** Does the job's placeholder still exist on the board? */
+async function placeholderPresent(job: ActiveJob): Promise<boolean> {
+  if (!job.placeholderId) return false;
+  try {
+    return Boolean(await miro.board.getById(job.placeholderId));
+  } catch {
+    return false;
+  }
 }
 
 async function finalize(job: ActiveJob, s: StatusResponse): Promise<void> {
@@ -62,6 +69,18 @@ async function finalize(job: ActiveJob, s: StatusResponse): Promise<void> {
   // loop calls after a foreground poll, so a reload can't behave differently
   // from what would have happened had the board stayed open.
   if (await advancePipelineForJob(job, s)) return;
+
+  // The placeholder is the hand-off token. If it is already gone, the live
+  // agent finished this job in the moment before the board reloaded (it
+  // deletes the placeholder, creates the output, then clears the ledger — a
+  // reload between the last two steps lands here). Placing the output again
+  // would duplicate it, and throwing would leave the job "resuming…" on every
+  // board load forever, so just drop the ledger entry.
+  if (!(await placeholderPresent(job))) {
+    console.warn(`[resume_jobs] placeholder for ${job.requestId} is gone — assuming it was already finalized`);
+    await removeActiveJob(job.requestId);
+    return;
+  }
 
   const pos = job.targetPosition;
   const outputUrl = s.output?.[0];
@@ -107,7 +126,12 @@ async function finalize(job: ActiveJob, s: StatusResponse): Promise<void> {
         const clip = clips[i];
         const x = baseX + i * (width + gapX);
         const embed = await createEmbedAtPosition({ url: rigEmbedUrl(clip.url), x, y: baseY, width, height });
-        await setItemGenerationSettings(embed.id, { ...settings, animations: [clip] });
+        // Cost on the first clip only, as in fal_rig's live path.
+        await setItemGenerationSettings(embed.id, {
+          ...settings,
+          ...(i > 0 ? { costUSD: undefined } : {}),
+          animations: [clip],
+        });
       }
     } else if (job.kind === 'video' || job.kind === 'model3d' || job.kind === 'panorama') {
       // Swap the placeholder image for an inline embed (video player, 3D
@@ -147,19 +171,36 @@ async function finalize(job: ActiveJob, s: StatusResponse): Promise<void> {
   await removeActiveJob(job.requestId);
 }
 
-async function pollUntilDone(
-  job: ActiveJob,
-  intervalMs = 5000,
-  timeoutMs = 15 * 60 * 1000,
-): Promise<void> {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const s = await api.getStatus(job.endpointId, job.requestId);
-    if (isTerminal(s.status)) {
-      await finalize(job, s);
+/** The same budget the job's own agent would have given it. */
+function budgetFor(kind: ActiveJob['kind']) {
+  switch (kind) {
+    case 'image':
+      return POLL_BUDGET.image;
+    case 'video':
+    case 'audio':
+      return POLL_BUDGET.video;
+    case 'model3d':
+      return POLL_BUDGET.model3d;
+    case 'rig':
+      return POLL_BUDGET.rig;
+    case 'panorama':
+      return POLL_BUDGET.panorama;
+    default:
+      return POLL_BUDGET.generic;
+  }
+}
+
+async function pollUntilDone(job: ActiveJob): Promise<void> {
+  try {
+    const s = await pollStatus(job.endpointId, job.requestId, undefined, budgetFor(job.kind));
+    await finalize(job, s);
+  } catch (err) {
+    if (shouldLeaveForResume(err)) {
+      // Still running (or the backend is unreachable) — keep the ledger entry
+      // so the next board load tries again.
+      console.warn(`[resume_jobs] request ${job.requestId} left for the next load:`, err);
       return;
     }
-    await new Promise((r) => setTimeout(r, intervalMs));
+    throw err;
   }
-  console.warn(`[resume_jobs] request ${job.requestId} still pending after timeout`);
 }

@@ -4,6 +4,10 @@ https://github.com/CharlieWinters/fal-miro
 
 This product includes software developed by Sean Winters.
 
+An independent, unofficial project. Not affiliated with, endorsed by, or supported by Miro or fal.ai.
+"Miro" is a trademark of RealtimeBoard, Inc. dba Miro; "fal" is a trademark
+of its owner. Both are used only to describe what this software connects to.
+
 Licensed under the Apache License, Version 2.0. If you redistribute this
 software or a derivative of it, Apache-2.0 section 4(d) requires you to carry
 the attribution above with it -- in a NOTICE file, in your documentation, or in
@@ -30,6 +34,14 @@ with or endorsement by any of them is claimed.
 
 If you own one of these marks and would rather it were not here, open an issue
 and it will be removed.
+
+## Bundled dependencies
+
+The frontend build bundles React, react-dom, three.js, @fal-ai/client and
+their dependencies (MIT, ISC and BSD-2-Clause licences). Their copyright and
+permission notices are generated at build time into
+`THIRD_PARTY_NOTICES.txt`, shipped next to the bundles and linked from the
+app's Settings screen. Run `npm run notices` in `frontend/` to regenerate it.
 
 ## Runtime dependencies loaded from a CDN
 

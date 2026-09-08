@@ -3,6 +3,7 @@ import { AGENT_UPDATE, type AgentUpdateMessage } from '../shared/messageTypes';
 import { getActiveJobs, removeActiveJob, type ActiveJob } from '../shared/storage';
 import { api } from '../lib/api';
 import { makePlaceholderDataUrl, replaceImageContent } from '../shared/boardHelpers';
+import { isOurs } from '../shared/frameMessaging';
 
 /**
  * Panel-side, in-memory job ledger. Tracks every `startAgentJob` call, listens
@@ -35,6 +36,7 @@ class JobLedger {
     if (this.wired) return;
     this.wired = true;
     window.addEventListener('message', (event: MessageEvent) => {
+      if (!isOurs(event)) return;
       const m = event.data as Partial<AgentUpdateMessage>;
       if (!m || m.type !== AGENT_UPDATE || !m.requestId) return;
       const job = this.jobs.find((j) => j.requestId === m.requestId);

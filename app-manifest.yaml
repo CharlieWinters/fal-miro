@@ -3,6 +3,16 @@
 # Replace `https://your-frontend.example.com` with wherever you host the
 # static build (Netlify, S3+CloudFront, Vercel, etc).
 
+# Naming follows Miro's "<Your app> for Miro" convention for third-party apps
+# (developers.miro.com/docs/design-guidelines, "App names"). The app is
+# independent and unofficial — not affiliated with, endorsed by, or supported
+# by Miro or fal.ai. The manifest has no description field; paste this into the
+# app's Description in the developer dashboard so installers see it too:
+#
+#   Generate images, video, 3D models and audio on your board with fal.ai
+#   models. An independent, unofficial project — not affiliated with, endorsed
+#   by, or supported by Miro or fal.ai. Bring your own fal key or backend;
+#   generations bill your own fal account.
 appName: Fal for Miro
 sdkVersion: SDK_V2
 

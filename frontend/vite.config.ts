@@ -26,7 +26,7 @@ export default defineConfig(({ command }) => ({
   },
   plugins: [react()],
   server: {
-    // Runway uses 5173, ElevenLabs 5174 — keep this app on its own port.
+    // Fixed port: the backend's default ALLOWED_ORIGINS and the dev Miro app's sdkUri both name it.
     port: 5175,
   },
 }));

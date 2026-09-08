@@ -2,20 +2,22 @@
 
 Thanks for taking a look. This is a personal project released so others can
 learn from it and build on it — issues and pull requests are welcome, and so is
-forking it and going your own way.
+forking it and going your own way. It is independent and unofficial: not
+affiliated with, endorsed by, or supported by Miro or fal.ai, and nothing here
+speaks for either company.
 
 ## Getting set up
 
-You need Node 20+, a [fal.ai](https://fal.ai) API key, and a Miro account with
-developer access to a team.
+You need Node 22.12 or newer (there is an `.nvmrc`), a [fal.ai](https://fal.ai)
+API key, and a Miro account with developer access to a team.
 
 ```bash
 # backend
-cd backend && npm install && cp .env.example .env   # fill in FAL_KEY + BACKEND_KEY
+cd backend && npm ci && cp .env.example .env   # fill in FAL_KEY + BACKEND_KEY (the frontend must be given the same BACKEND_KEY)
 npm run dev
 
 # frontend, in another shell
-cd frontend && npm install && npm run dev
+cd frontend && npm ci && npm run dev
 ```
 
 Then create a Miro app pointing at `http://localhost:5175`. `README.md` has the
@@ -25,7 +27,7 @@ Before you open a PR:
 
 ```bash
 cd frontend && npm run lint && npm test && npm run build
-cd backend  && npm run typecheck
+cd backend  && npm run typecheck && npm test
 ```
 
 CI runs exactly these. `npm run lint` is typecheck plus the boundary rules;

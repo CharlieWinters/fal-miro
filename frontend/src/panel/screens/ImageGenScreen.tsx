@@ -149,7 +149,7 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
   // Frame-aware, unlike a plain multi-select — a "References" frame full of
   // images works the same as shift-clicking each one.
   // Image-primary: the model *requires* an image, so the image is the subject
-  // (Runway-style — select one on the board), not an optional URL field.
+  // (select one on the board), not an optional URL field.
   // `generate` models force text-primary even if the schema marks an image required.
   const imagePrimary = !model.generate && Boolean(referenceField?.required) && !multiView;
   // Whether the schema has an image input at all — offer the board picker even
@@ -635,7 +635,7 @@ function ViewSlot({
 /**
  * Asset naming: shows the id auto-detected from the prompt (editable), the name
  * the finished image will get, and a settings disclosure for the extraction
- * regex. Mirrors the Runway "detected asset" UX.
+ * regex.
  */
 function AssetNaming({
   cfg,

@@ -151,9 +151,10 @@ export type RecipeSeed = {
   referenceField?: RecipeFieldRef | null;
   videoReferenceField?: RecipeFieldRef | null;
   /** Connected images/videos with their board titles — titles matter here,
-   *  not just cosmetically: Seedance/Veo order references and build the
-   *  @Image/@Video legend by title mention, so a title-less id would silently
-   *  show as "untitled" even though the connected item is actually named. */
+   *  not just cosmetically: the reference legend and the Seedance @Image/@Video
+   *  token rewrite are keyed on the title, so a title-less id would silently
+   *  show as "untitled" even though the connected item is actually named.
+   *  Order is the basket order (see shared/referenceBinding.ts). */
   images: Array<{ id: string; title?: string }>;
   videos: Array<{ id: string; title?: string }>;
   audios: Array<{ id: string; title?: string }>;

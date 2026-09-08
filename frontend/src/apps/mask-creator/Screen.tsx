@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { api, type StatusResponse } from '../../lib/api';
 import { useFirstSelected } from '../../panel/hooks/useSelection';
 import { createImageAtAbsolute, getImageRef, resolveAbsolutePosition } from '../../shared/boardHelpers';
+import { pollStatus as sharedPollStatus } from '../../shared/pollStatus';
+import { estimateCostUSD, reportedInferenceSeconds } from '../../shared/cost';
+import { setItemGenerationSettings } from '../../shared/storage';
 
 type ImageItem = { id: string };
 type Point = { x: number; y: number; label: 0 | 1 };
@@ -31,6 +34,8 @@ export function MaskCreatorScreen() {
   const [points, setPoints] = useState<Point[]>([]);
   const [prompt, setPrompt] = useState('');
   const [maskUrl, setMaskUrl] = useState<string | null>(null);
+  /** What produced maskUrl — stamped on the board item when it is saved. */
+  const lastRun = useRef<{ input: Record<string, unknown>; seconds?: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -116,17 +121,17 @@ export function MaskCreatorScreen() {
     setError(null);
     setStatus('Segmenting…');
     try {
-      const { requestId } = await api.run({
-        endpointId: SAM_ENDPOINT,
-        input: {
-          image_url: imageUrl,
-          prompt: trimmedPrompt,
-          ...(points.length > 0 ? { point_prompts: points } : {}),
-        },
-      });
+      const input = {
+        image_url: imageUrl,
+        prompt: trimmedPrompt,
+        ...(points.length > 0 ? { point_prompts: points } : {}),
+      };
+      const { requestId } = await api.run({ endpointId: SAM_ENDPOINT, input });
       const final = await pollStatus(requestId, (s) => setStatus(`SAM ${s.status.toLowerCase()}…`));
+      if (final.status !== 'SUCCEEDED') throw new Error(final.error ?? `SAM ${final.status}`);
       const mask = (final.data?.masks as Array<{ url?: string }> | undefined)?.[0]?.url;
       if (!mask) throw new Error('No mask returned');
+      lastRun.current = { input, seconds: reportedInferenceSeconds(final.data) };
       setMaskUrl(mask);
       setStatus('Mask ready ✓');
     } catch (e) {
@@ -146,7 +151,15 @@ export function MaskCreatorScreen() {
       const width = abs?.width ?? naturalSize?.width ?? 512;
       const x = abs?.absoluteX ?? 0;
       const y = abs ? abs.absoluteY + abs.height / 2 + 60 + width / 2 : 0;
-      await createImageAtAbsolute({ url: maskUrl, x, y, width, title: 'Fal · Mask' });
+      const placed = await createImageAtAbsolute({ url: maskUrl, x, y, width, title: 'Fal · Mask' });
+      const ratio = abs?.width && abs?.height ? `${Math.round(abs.width)}:${Math.round(abs.height)}` : '1:1';
+      await setItemGenerationSettings(placed.id, {
+        endpointId: SAM_ENDPOINT,
+        input: lastRun.current?.input ?? {},
+        ratio,
+        parents: [itemId],
+        costUSD: await estimateCostUSD(SAM_ENDPOINT, { units: 1, seconds: lastRun.current?.seconds }),
+      });
       setStatus('Mask placed on board ✓');
     } catch (e) {
       setError(`Could not place mask: ${e instanceof Error ? e.message : String(e)}`);
@@ -224,18 +237,7 @@ export function MaskCreatorScreen() {
   );
 }
 
-async function pollStatus(
-  requestId: string,
-  onTick: (s: StatusResponse) => void,
-  intervalMs = 2500,
-  timeoutMs = 3 * 60 * 1000,
-): Promise<StatusResponse> {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const s = await api.getStatus(SAM_ENDPOINT, requestId);
-    onTick(s);
-    if (s.status === 'SUCCEEDED' || s.status === 'FAILED' || s.status === 'UNKNOWN') return s;
-    await new Promise((r) => setTimeout(r, intervalMs));
-  }
-  throw new Error(`Request ${requestId} timed out`);
-}
+// SAM is quick; a tight interval and a short budget. Polling itself lives in
+// shared/pollStatus.
+const pollStatus = (requestId: string, onTick: (s: StatusResponse) => void) =>
+  sharedPollStatus(SAM_ENDPOINT, requestId, onTick, { intervalMs: 2500, timeoutMs: 3 * 60 * 1000 });

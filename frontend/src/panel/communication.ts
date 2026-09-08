@@ -5,23 +5,15 @@ import {
   type AgentUpdateMessage,
 } from '../shared/messageTypes';
 import { jobLedger, type LocalJob } from './jobs';
+import { isOurs, postToSiblings } from '../shared/frameMessaging';
 
 let nextId = 1;
 const newRequestId = () => `req_${Date.now()}_${nextId++}`;
 
+// Same-origin only (see shared/frameMessaging): every other installed Miro
+// app is a sibling iframe on this page, and a RUN_AGENT carries the prompt.
 function postRunAgent(message: RunAgentMessage): void {
-  try {
-    for (let i = 0; i < window.parent.frames.length; i++) {
-      try {
-        window.parent.frames[i].postMessage(message, '*');
-      } catch {
-        /* ignore cross-origin */
-      }
-    }
-    window.parent.postMessage(message, '*');
-  } catch (e) {
-    console.warn('[panel] postMessage failed:', e);
-  }
+  postToSiblings(message);
 }
 
 /**
@@ -38,6 +30,7 @@ export function runAgent<T = unknown>(
 
   return new Promise<T>((resolve, reject) => {
     const onMessage = (event: MessageEvent) => {
+      if (!isOurs(event)) return;
       const m = event.data as Partial<AgentUpdateMessage>;
       if (!m || m.type !== AGENT_UPDATE || m.requestId !== requestId) return;
 

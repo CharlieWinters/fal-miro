@@ -135,46 +135,79 @@ in more detail.
 
 ## Run it locally (dev)
 
+You need Node 22.12 or newer (`.nvmrc` pins it). Two things have to agree
+before anything works: **`BACKEND_KEY` in `backend/.env`** and **the same
+value in the panel's Settings** (or `VITE_BACKEND_KEY` in `frontend/.env`
+for dev). Without both, every `/api/fal/*` call is rejected with a 401 and
+the panel just looks empty.
+
 Backend (Node — see [Deploy your own backend](#deploy-your-own-backend) for
 Cloudflare Workers):
 
 ```bash
 cd backend
-cp .env.example .env        # then set FAL_KEY=...
-npm install
+cp .env.example .env        # then set FAL_KEY=... and BACKEND_KEY=<any random string>
+npm ci
 npm run dev                 # http://localhost:8789
 npm run typecheck           # tsc --noEmit
+npm test                    # route tests (auth, status mapping, proxy allowlist)
 ```
 
 Frontend:
 
 ```bash
 cd frontend
-cp .env.example .env        # VITE_API_BASE_URL=http://localhost:8789, VITE_BACKEND_KEY=<your local BACKEND_KEY>
-npm install
+cp .env.example .env        # VITE_API_BASE_URL=http://localhost:8789, VITE_BACKEND_KEY=<the same BACKEND_KEY>
+npm ci
 npm run dev                 # http://localhost:5175
 npm run lint                # type-check + boundary rules (see CONTRIBUTING.md)
+npm test
 ```
 
-To load a local build in Miro, create an app, paste `app-manifest.yaml`, and
-point `sdkUri` at your hosted (or tunnelled) `index.html`.
+To load the local build in Miro you need a **development Miro app** of your
+own, separate from the published one:
+
+1. Create a Developer team if you don't have one:
+   <https://miro.com/app/dashboard/?createDevTeam=1>.
+2. In that team, open **Profile settings → Your apps → Create new app**.
+3. Paste `app-manifest.yaml` into the App Manifest editor, with `sdkUri` set to
+   `http://localhost:5175/index.html`. Plain `http://localhost` is accepted for
+   development; no tunnel is needed.
+4. Click **Install app and get OAuth token** and pick the Developer team. The
+   app's icon now appears in the toolbar of every board on that team.
+
+Why a local frontend and not the hosted one: Chrome will not let a page on
+`https://charliewinters.github.io` fetch `http://localhost:8789` (it treats a
+public page reaching a loopback address as a permission request, and Miro's
+iframe cannot grant it). Serving the frontend from `localhost` too keeps the
+whole thing on one address space.
 
 ## Quick backend smoke test
 
+Every `/api/fal/*` call needs the shared secret as the `x-fal-proxy-key`
+header; without it you get `401 Unauthorized`.
+
 ```bash
+export KEY=<your BACKEND_KEY>
+
 curl localhost:8789/healthz
-# {"ok":true,"hasKey":true}
+# {"ok":true}            — add the key header to also see which Fal keys are configured
+curl -H "x-fal-proxy-key: $KEY" localhost:8789/healthz
+# {"ok":true,"hasKey":true,"hasAdminKey":false}
 
 # Fetch a model's schema (drives the generated form):
-curl "localhost:8789/api/fal/schema?endpointId=fal-ai/flux/dev" | head
+curl -H "x-fal-proxy-key: $KEY" "localhost:8789/api/fal/schema?endpointId=fal-ai/flux/dev" | head
 
-# Kick off a generation:
+# Kick off a generation (this one bills your Fal account):
 curl -X POST localhost:8789/api/fal/run \
+  -H "x-fal-proxy-key: $KEY" \
   -H 'Content-Type: application/json' \
   -d '{"endpointId":"fal-ai/flux/dev","input":{"prompt":"a red bicycle"}}'
 # {"requestId":"…","endpointId":"fal-ai/flux/dev","status":"QUEUED"}
 
-curl "localhost:8789/api/fal/status/<requestId>?endpointId=fal-ai/flux/dev"
+curl -H "x-fal-proxy-key: $KEY" "localhost:8789/api/fal/status/<requestId>?endpointId=fal-ai/flux/dev"
+# A request Fal itself rejected comes back as {"status":"FAILED","error":"…"} with HTTP 200;
+# a 502 means the backend could not reach Fal.
 ```
 
 ## Contributing

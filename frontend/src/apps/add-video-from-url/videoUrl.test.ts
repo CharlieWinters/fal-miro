@@ -213,3 +213,31 @@ describe('formatBytes', () => {
     expect(formatBytes(0)).toBeNull();
   });
 });
+
+describe('pickArchiveVideo — container extensions', () => {
+  it('matches the extension case-insensitively (CLIP.MP4)', () => {
+    const r = pickArchiveVideo('x', { files: [{ name: 'CLIP.MP4', size: '10' }] });
+    expect(r).toMatchObject({ name: 'CLIP.MP4', url: 'https://archive.org/download/x/CLIP.MP4' });
+  });
+
+  it.each(['.webm', '.ogv', '.ogg', '.m4v', '.mov', '.mp4'])('accepts a %s file', (ext) => {
+    const r = pickArchiveVideo('x', { files: [{ name: `clip${ext}`, size: '10' }] });
+    expect('url' in r).toBe(true);
+    expect('name' in r && r.name).toBe(`clip${ext}`);
+  });
+
+  it('errors on an item whose only video is an .mkv', () => {
+    const r = pickArchiveVideo('x', { files: [{ name: 'clip.mkv', format: 'Matroska', size: '10' }] });
+    expect(r).toMatchObject({ error: expect.stringContaining('no browser-playable video') });
+  });
+
+  it('skips the .mkv and picks the playable sibling', () => {
+    const r = pickArchiveVideo('x', {
+      files: [
+        { name: 'clip.mkv', size: '1' },
+        { name: 'clip.webm', size: '900' },
+      ],
+    });
+    expect('name' in r && r.name).toBe('clip.webm');
+  });
+});

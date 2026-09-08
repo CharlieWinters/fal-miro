@@ -24,6 +24,13 @@ export function SoundScreen({ model }: { model: FalModel }) {
   const promptField = model.endpointId.includes('foley') ? 'text_prompt' : 'prompt';
   const promptRequired = !model.endpointId.includes('thinksound');
 
+  /** Why Add sound can't run yet, or null — drives the disabled button. */
+  const blockReason: string | null = !videoUrl || !selected
+    ? 'Select a Fal video on the board first.'
+    : promptRequired && !prompt.trim()
+      ? 'Describe the sound you want — this model needs a prompt.'
+      : null;
+
   const onGenerate = () => {
     setNote(null);
     if (!videoUrl || !selected) {
@@ -87,9 +94,16 @@ export function SoundScreen({ model }: { model: FalModel }) {
         The result is the same video with audio added.
       </div>
 
-      <button type="button" className="primary" onClick={onGenerate}>
+      <button
+        type="button"
+        className="primary"
+        onClick={onGenerate}
+        disabled={Boolean(blockReason)}
+        title={blockReason ?? undefined}
+      >
         Add sound
       </button>
+      {blockReason && <div className="hint">{blockReason}</div>}
 
       {note && <div className="notice">{note}</div>}
     </div>

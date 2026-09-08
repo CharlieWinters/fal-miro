@@ -226,3 +226,60 @@ describe('providerOf', () => {
     expect(providerOf('')).toBeTruthy(); // never throws on junk
   });
 });
+
+describe('mergeSyncedCatalog — labels and status', () => {
+  it("uses fal's displayName as the label and family when present", () => {
+    const [m] = mergeSyncedCatalog([meta('fal-ai/flux/dev', 'text-to-image', { displayName: 'FLUX.1 [dev]' })]);
+    expect(m.label).toBe('FLUX.1 [dev]');
+    expect(m.family).toBe('FLUX.1 [dev]');
+    expect(m.label).not.toBe('fal-ai/flux/dev');
+  });
+
+  it('falls back to the endpoint id when displayName is null or blank', () => {
+    expect(route('fal-ai/flux/dev', 'text-to-image').label).toBe('fal-ai/flux/dev');
+    const [blank] = mergeSyncedCatalog([meta('fal-ai/flux/dev', 'text-to-image', { displayName: '   ' })]);
+    expect(blank.label).toBe('fal-ai/flux/dev');
+  });
+
+  it('trims a padded displayName', () => {
+    const [m] = mergeSyncedCatalog([meta('fal-ai/flux/dev', 'text-to-image', { displayName: '  Flux Dev  ' })]);
+    expect(m.label).toBe('Flux Dev');
+  });
+
+  it.each(['deprecated', 'archived', 'beta', 'retired', 'disabled'])(
+    'excludes a model whose status is %s — anything not active is out',
+    (status) => {
+      const out = mergeSyncedCatalog([
+        meta('fal-ai/a', 'text-to-image'),
+        meta('fal-ai/b', 'text-to-image', { status }),
+      ]);
+      expect(out.map((m) => m.endpointId)).toEqual(['fal-ai/a']);
+    },
+  );
+
+  it('keeps a model with status active or with no status at all', () => {
+    const out = mergeSyncedCatalog([
+      meta('fal-ai/a', 'text-to-image', { status: 'active' }),
+      meta('fal-ai/b', 'text-to-image', { status: null }),
+    ]);
+    expect(out.map((m) => m.endpointId)).toEqual(['fal-ai/a', 'fal-ai/b']);
+  });
+
+  it('gives each task in a multi-task family a distinct label', () => {
+    // Seedance image-to-video has two browsable entries (plain + Start/End).
+    // If both carried the same label, the task picker would show two
+    // indistinguishable rows.
+    const out = mergeSyncedCatalog([
+      meta('fal-ai/bytedance/seedance/v1/pro/image-to-video', 'image-to-video', { displayName: 'Seedance 1.0 Pro' }),
+    ]);
+    expect(out).toHaveLength(2);
+    const labels = out.map((m) => m.label);
+    expect(new Set(labels).size).toBe(labels.length);
+    const [primary, extra] = out;
+    expect(primary.label).toBe('Seedance 1.0 Pro');
+    expect(extra.label).toBe('Seedance 1.0 Pro · Start + End');
+    expect(extra.label).toContain(extra.task!);
+    // Both remain in the same family so they group together in the browser.
+    expect(extra.family).toBe(primary.family);
+  });
+});

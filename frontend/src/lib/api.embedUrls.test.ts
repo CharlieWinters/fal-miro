@@ -8,7 +8,7 @@
 // must keep producing a URL the unwrapper can read, no matter what else it puts
 // in the query string, and it must never hand back the same URL twice.
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   videoEmbedUrl,
   model3dEmbedUrl,
@@ -76,5 +76,53 @@ describe('cache-buster placement', () => {
     const u = new URL(built, 'https://example.test');
     const reordered = `${u.origin}${u.pathname}?cb=${u.searchParams.get('cb')}&url=${encodeURIComponent(asset)}`;
     expect(unwrapModel3dEmbedUrl(reordered)).toBe(asset);
+  });
+});
+
+describe('subpath hosting (import.meta.env.BASE_URL)', () => {
+  // GitHub Pages serves the frontend as a project site at /fal-miro/, not the
+  // domain root. vite.config.ts sets `base` accordingly and frontendPageUrl is
+  // the one place that has to honour it — drop BASE_URL there and every embed
+  // on a Pages deployment 404s to a grey placeholder.
+  const BUILDERS = [
+    ['videoEmbedUrl', 'embed-video.html'],
+    ['model3dEmbedUrl', 'embed-3d.html'],
+    ['audioEmbedUrl', 'embed-audio.html'],
+    ['panoramaEmbedUrl', 'embed-panorama.html'],
+    ['rigEmbedUrl', 'embed-rig.html'],
+  ] as const;
+
+  async function freshApi() {
+    // The module reads the env at call time, but re-importing makes the test
+    // independent of how vitest happens to wire import.meta.env.
+    vi.resetModules();
+    return (await import('./api')) as unknown as Record<(typeof BUILDERS)[number][0], (u: string) => string>;
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it.each(BUILDERS)('%s puts the base path between the origin and the page', async (name, page) => {
+    vi.stubEnv('BASE_URL', '/fal-miro/');
+    const api = await freshApi();
+    const built = api[name]('https://v3b.fal.media/files/b/x/asset.bin');
+    expect(built.startsWith(`${window.location.origin}/fal-miro/${page}?`)).toBe(true);
+  });
+
+  it.each(BUILDERS)('%s resolves to the origin root when the base is "/"', async (name, page) => {
+    vi.stubEnv('BASE_URL', '/');
+    const api = await freshApi();
+    const built = api[name]('https://v3b.fal.media/files/b/x/asset.bin');
+    expect(built.startsWith(`${window.location.origin}/${page}?`)).toBe(true);
+    expect(built).not.toContain('/fal-miro/');
+  });
+
+  it('still round-trips through the unwrapper under a subpath', async () => {
+    vi.stubEnv('BASE_URL', '/fal-miro/');
+    const mod = await import('./api');
+    const asset = 'https://v3b.fal.media/files/b/x/clip.mp4';
+    expect(mod.unwrapVideoEmbedUrl(mod.videoEmbedUrl(asset))).toBe(asset);
   });
 });

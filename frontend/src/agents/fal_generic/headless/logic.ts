@@ -22,6 +22,12 @@ import { placeGenericOutput, type OutputKind } from '../../../shared/genericOutp
 import { estimateCostUSD, reportedInferenceSeconds } from '../../../shared/cost';
 import { parseFalInputSchema, pickAspectRatioField } from '../../../shared/schema';
 import { broadcastUpdate } from '../../../headless/communications';
+import { POLL_BUDGET, pollStatus as sharedPollStatus, shouldLeaveForResume as isTimeout } from '../../../shared/pollStatus';
+
+// Polling lives in shared/pollStatus; this agent only chooses its budget.
+const pollStatus = (endpointId: string, requestId: string, onTick: (s: StatusResponse) => void) =>
+  sharedPollStatus(endpointId, requestId, onTick, POLL_BUDGET.generic);
+
 
 /**
  * The catch-all agent: runs any Fal endpoint from a schema-built input and
@@ -255,25 +261,4 @@ export async function run(payload: unknown, requestId = ''): Promise<GenericGenR
   throw new Error(`Generation ${final.status}${outputUrl ? '' : ' (no output returned)'}`);
 }
 
-function isTimeout(err: unknown): boolean {
-  return err instanceof Error && err.name === 'PollTimeout';
-}
 
-async function pollStatus(
-  endpointId: string,
-  fid: string,
-  onTick: (s: StatusResponse) => void,
-  intervalMs = 4000,
-  timeoutMs = 10 * 60 * 1000,
-): Promise<StatusResponse> {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const s = await api.getStatus(endpointId, fid);
-    onTick(s);
-    if (s.status === 'SUCCEEDED' || s.status === 'FAILED' || s.status === 'UNKNOWN') return s;
-    await new Promise((r) => setTimeout(r, intervalMs));
-  }
-  const err = new Error(`Request ${fid} timed out after ${timeoutMs / 1000}s`);
-  err.name = 'PollTimeout';
-  throw err;
-}

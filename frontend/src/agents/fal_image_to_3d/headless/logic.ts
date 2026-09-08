@@ -20,6 +20,13 @@ import {
   type GenSettings,
 } from '../../../shared/storage';
 import { broadcastUpdate } from '../../../headless/communications';
+import { POLL_BUDGET, pollStatus as sharedPollStatus, shouldLeaveForResume as isTimeout } from '../../../shared/pollStatus';
+import { estimateCostUSD } from '../../../shared/cost';
+
+// Polling lives in shared/pollStatus; this agent only chooses its budget.
+const pollStatus = (endpointId: string, requestId: string, onTick: (s: StatusResponse) => void) =>
+  sharedPollStatus(endpointId, requestId, onTick, POLL_BUDGET.model3d);
+
 
 export type ImageTo3dPayload = {
   endpointId: string;
@@ -210,7 +217,7 @@ export async function run(payload: unknown, requestId = ''): Promise<ImageTo3dRe
       height,
       previewUrl: asPreviewUrl(sourceUrl),
     });
-    settings.costUSD = await estimateCost(endpointId, 1);
+    settings.costUSD = await estimateCostUSD(endpointId, { units: 1 });
     await setItemGenerationSettings(embed.id, settings);
     await removeActiveJob(falRequestId);
     return { requestId: falRequestId, embedItemId: embed.id, outputUrl };
@@ -230,37 +237,5 @@ function isEmpty(v: unknown): boolean {
   return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 }
 
-/** A poll timeout (job may still be running) vs. a real failure. */
-function isTimeout(err: unknown): boolean {
-  return err instanceof Error && err.name === 'PollTimeout';
-}
 
-async function estimateCost(endpointId: string, units: number): Promise<number | undefined> {
-  try {
-    const est = await api.estimate(endpointId, Math.max(1, units));
-    return est.costUSD ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
 
-async function pollStatus(
-  endpointId: string,
-  requestId: string,
-  onTick: (s: StatusResponse) => void,
-  intervalMs = 4000,
-  timeoutMs = 20 * 60 * 1000,
-): Promise<StatusResponse> {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const s = await api.getStatus(endpointId, requestId);
-    onTick(s);
-    if (s.status === 'SUCCEEDED' || s.status === 'FAILED' || s.status === 'UNKNOWN') {
-      return s;
-    }
-    await new Promise((r) => setTimeout(r, intervalMs));
-  }
-  const err = new Error(`Request ${requestId} timed out after ${timeoutMs / 1000}s`);
-  err.name = 'PollTimeout';
-  throw err;
-}

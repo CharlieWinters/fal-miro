@@ -1,5 +1,5 @@
 // Thin wrappers around the Miro Web SDK shared across agents. Adapted from the
-// Runway integration, trimmed to what the Fal image agent needs.
+// Board helpers shared by the agents and screens.
 
 import { unwrapVideoEmbedUrl, unwrapAudioEmbedUrl } from '../lib/api';
 
@@ -469,7 +469,15 @@ export async function resolveAbsolutePosition(
     parentId?: string;
   };
 
-  const item = (await miro.board.getById(itemId)) as Resolvable | null;
+  // getById throws (rather than returning null) for an id that is no longer
+  // on the board — e.g. a placeholder another finalize already swapped out.
+  // A missing item is a normal answer here, not an error.
+  let item: Resolvable | null;
+  try {
+    item = (await miro.board.getById(itemId)) as Resolvable | null;
+  } catch {
+    return null;
+  }
   if (!item) return null;
 
   const ownX = item.x ?? 0;

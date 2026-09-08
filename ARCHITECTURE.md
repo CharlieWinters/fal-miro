@@ -1,8 +1,8 @@
 # Architecture — Fal for Miro
 
-Same three-iframe + decoupled-backend pattern as the Runway and ElevenLabs
-integrations. This file is the repo-local copy of the board's architecture
-diagram and the v1 plan.
+Three iframes plus a decoupled backend. This file is the repo-local copy of
+the architecture notes; where it and the code disagree, the code wins and this
+file needs a fix.
 
 ## Three iframes
 
@@ -10,7 +10,7 @@ diagram and the v1 plan.
 | -------- | --------------------- | ------------------------- | --- |
 | Headless | `frontend/index.html` | `src/headless/index.ts`   | Owns the Miro SDK, listens for `icon:click` (opens the panel) and `RUN_AGENT` messages, runs agents, mutates the board, polls Fal. Keeps running if the panel is closed. |
 | Panel    | `frontend/app.html`   | `src/panel/App.tsx`       | UI only. Searchable, model-named home screen. Sends `RUN_AGENT`, renders progress. |
-| Modal    | `frontend/modal.html` | `src/modal/App.tsx`       | Fullscreen overlays. Stub. |
+| Modal    | `frontend/modal.html` | `src/modal/App.tsx`       | Fullscreen overlays: the six capture tools (3D Viewer, Video Player, Panorama, Rig Viewer, Pose Character, Scene Builder), routed by `?tool=`. |
 
 Cross-frame contract: `src/shared/messageTypes.ts`. The panel calls
 `runAgent()` (`src/panel/communication.ts`) which posts `RUN_AGENT`; the
@@ -84,10 +84,12 @@ while `data` always carries the full untouched payload.
 ### Frontend ↔ backend: which backend, and how it's authenticated
 
 The frontend build has no backend baked in at build time. `frontend/src/lib/api.ts`
-holds a runtime-settable `{ url, key }` pair (`configureBackend()`); every
+holds a runtime-settable connection (`configureConnection()`): either a
+backend `{ url, key }` pair or, in client mode, a Fal key used directly from the
+browser. In backend mode every
 `/api/fal/*` call sends `key` back as `x-fal-proxy-key`. Each of the three
 iframes loads this once at startup via `shared/backendConfig.ts`'s
-`loadBackendConfig()`, which reads `getBackendConfig()` — backed by this
+`loadBackendConfig()`, which reads `getConnectionConfig()` — backed by this
 **browser's `localStorage`** (key `fal:backendConfig`), not board appData.
 That's deliberate: this is a per-person setting, not per-board or per-team —
 different people collaborating on the very same board may each be running
@@ -109,7 +111,7 @@ configured, unlike a board-appData read.
 never `key` — it ends up in an `<img>`/`<video>` `src` attribute, which can't
 carry a custom header (see the backend's auth section above). The embed URL
 builders (`videoEmbedUrl`, …) don't call the backend at all — see "Embed
-pages" above — so `backendUrl()`/`backendKey()` don't come into it for them.
+pages" above — so the configured backend doesn't come into it for them.
 
 ## Option A — schema-driven form (the chosen approach)
 
@@ -209,10 +211,10 @@ and one aggregator line. Recipe for a new one:
    It can import `appDef` from its own folder's `index.ts` directly (e.g. to
    list "Models used") rather than going through the registry.
 3. Register the one new app in `shared/pipelineApps.ts` (import `appDef`,
-   add it to the `APPS` array — the only file a new app's addition touches
-   outside its own folder) and add a tile for it in `HomeScreen.tsx`'s Apps
-   section (`browseMode === 'usecase'`), calling `onOpenApp('your-app-id')`;
-   register the screen in `App.tsx`'s `openApp === 'your-app-id'` branch.
+   add it to the `APPS` array), add a tile for it in `HomeScreen.tsx`'s Apps
+   section (`browseMode === 'apps'`), calling `onOpenApp('your-app-id')`, and
+   register the screen in `App.tsx`'s `openApp === 'your-app-id'` branch. Those
+   three files are the only ones a new app touches outside its own folder.
 
 The one piece of shared "magic" is `shared/pipelineRunner.ts`'s
 `advancePipelineForJob` — called from exactly two places: the live loop in
@@ -229,25 +231,23 @@ back with `outputUrl` undefined and gets treated as if it failed. Wiring up a
 genuinely text-output step needs `outputUrl`/`extractOutputUrls` extended
 first — not yet done.
 
-### Flavor 2 — interactive modal tools (e.g. Mask Creator)
+### Flavor 2 — interactive tools (e.g. Mask Creator)
 
 Not every app is a model pipeline — some are canvas/editor UIs that call Fal
-once (or never). These follow the existing capture-tool pattern (the older
-3D/video/panorama/rig capture tools in `panel/screens/`, which predate the
-Apps concept and stay where they are): a screen that opens fullscreen in
-`modal.html` via `miro.board.ui.openModal({ url:
+once (or never). Mask Creator (`apps/mask-creator/Screen.tsx`) is a panel
+screen opened from the Apps tab via `onOpenApp('mask-creator')`; it owns its
+whole interaction loop (canvas painting, click handling) and reuses only image
+resolution (`boardHelpers.ts`), the shared poller (`shared/pollStatus.ts`) and
+the same `api.run` everything else uses. The older capture tools
+(3D/video/panorama/rig/pose/scene in `panel/screens/`) predate the Apps concept
+and open fullscreen in `modal.html` via `miro.board.ui.openModal({ url:
 'modal.html?tool=<id>&itemId=<id>', fullscreen: true })`, routed in
-`src/modal/App.tsx`. These own their entire interaction loop (canvas
-painting, click handling); the only plumbing they reuse is image resolution
-(`boardHelpers.ts`) and, if they call a model, the same `api.run`/`getStatus`
-everything else uses.
+`src/modal/App.tsx`; they stay where they are.
 
-A new Flavor-2 app still gets its own folder under `src/apps/<app-id>/`
-(e.g. `apps/mask-creator/Screen.tsx`) for the same reason Flavor 1 does —
-one folder per app — even though it has no `index.ts`/`PipelineAppDef`;
-it's wired up directly by `HomeScreen.tsx` (a "For your selection" card
-calling `onOpenTool('your-tool-id', itemId)`) and `modal/App.tsx`'s routing,
-not through `pipelineApps.ts`.
+A new Flavor-2 app still gets its own folder under `src/apps/<app-id>/` for
+the same reason Flavor 1 does — one folder per app — even though it has no
+`index.ts`/`PipelineAppDef`; it is wired up by `HomeScreen.tsx` and
+`App.tsx`, not through `pipelineApps.ts`.
 
 ### Flavor 3 — no-model apps (local compositing, asset libraries)
 
@@ -365,10 +365,7 @@ the app stays Flavor 3.
 
 ## What's NOT built yet (next milestones)
 
-- **The generic schema form + Advanced section** — currently the image screen
-  uses a small hardcoded `image_size` list; swap it for controls built from
-  `/api/fal/schema`.
-- **`fal_video_gen`** (with source-image aspect/resolution auto-detect) and
-  **`fal_audio_gen` / music**.
-- **Reference images** — `getConnectedReferenceImages` is ported but not yet fed
-  into image-to-image model inputs.
+- **Text-output pipeline steps** — see the "URL outputs only" limitation above.
+- **A dedicated audio agent** — text-to-audio and music run through
+  `fal_generic`; the schema form and `fal_video_gen` and reference images that
+  used to sit on this list are built.

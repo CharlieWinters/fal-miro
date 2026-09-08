@@ -116,7 +116,7 @@ export function BonePoseScreen({ itemId, onClose }: { itemId: string; onClose: (
     const ro = new ResizeObserver(recomputeFrame);
     ro.observe(stage);
     return () => ro.disconnect();
-  }, [recomputeFrame]);
+  }, [recomputeFrame, src]); // re-run once the stage mounts (it renders only after src resolves)
 
   // Build the three.js poser once the rig url + mount are ready.
   useEffect(() => {

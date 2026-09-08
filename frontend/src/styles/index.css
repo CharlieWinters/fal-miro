@@ -1575,6 +1575,9 @@ button.primary:disabled {
   line-height: 1.45;
   color: var(--muted);
 }
+.app-credit-disclaimer {
+  opacity: 0.85;
+}
 .app-credit-licence {
   opacity: 0.72;
 }

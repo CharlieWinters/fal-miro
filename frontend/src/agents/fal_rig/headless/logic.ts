@@ -17,6 +17,13 @@ import {
 } from '../../../shared/storage';
 import { extractAnimations, extractRestPose } from '../../../shared/meshyAnimations';
 import { broadcastUpdate } from '../../../headless/communications';
+import { POLL_BUDGET, pollStatus as sharedPollStatus, shouldLeaveForResume as isTimeout } from '../../../shared/pollStatus';
+import { estimateCostUSD } from '../../../shared/cost';
+
+// Polling lives in shared/pollStatus; this agent only chooses its budget.
+const pollStatus = (endpointId: string, requestId: string, onTick: (s: StatusResponse) => void) =>
+  sharedPollStatus(endpointId, requestId, onTick, POLL_BUDGET.rig);
+
 
 export type RigPayload = {
   endpointId: string;
@@ -75,7 +82,7 @@ export async function run(payload: unknown, requestId = ''): Promise<RigResult> 
         throw new Error(`Remesh ${rmFinal.status}${remeshedUrl ? '' : ' (no mesh returned)'}`);
       }
       finalInput.model_url = remeshedUrl;
-      remeshCost = await estimateCost(REMESH_ENDPOINT, 1);
+      remeshCost = await estimateCostUSD(REMESH_ENDPOINT, { units: 1 });
     } catch (err) {
       await replaceImageContent(placeholderId, makePlaceholderDataUrl(ratio, 'Remesh failed'), 'Fal · Failed', {
         x: targetX,
@@ -157,7 +164,7 @@ export async function run(payload: unknown, requestId = ''): Promise<RigResult> 
 
     const rest = extractRestPose(final.data);
     if (rest) settings.restPoseUrl = rest;
-    const rigCost = await estimateCost(endpointId, 1);
+    const rigCost = await estimateCostUSD(endpointId, { units: 1 });
     settings.costUSD = rigCost !== undefined || remeshCost !== undefined ? (rigCost ?? 0) + (remeshCost ?? 0) : undefined;
 
     // One embed per animation clip, laid out in a row — every clip is its own
@@ -173,8 +180,14 @@ export async function run(payload: unknown, requestId = ''): Promise<RigResult> 
       if (i === 0) firstEmbedId = embed.id;
       // Each embed's settings carry just its own clip (so reopening Rig
       // Viewer / the manual poser on it shows only what's actually there),
-      // plus the shared cost/lineage/rest-pose info.
-      await setItemGenerationSettings(embed.id, { ...settings, animations: [clip] });
+      // plus the shared lineage/rest-pose info. The run's cost goes on the
+      // first clip only — one rig job, one charge, however many clips it
+      // yields — so summing costUSD across the board stays honest.
+      await setItemGenerationSettings(embed.id, {
+        ...settings,
+        ...(i > 0 ? { costUSD: undefined } : {}),
+        animations: [clip],
+      });
     }
 
     await removeActiveJob(falRequestId);
@@ -189,36 +202,5 @@ export async function run(payload: unknown, requestId = ''): Promise<RigResult> 
   throw new Error(`Rigging ${final.status}${primaryUrl ? '' : ' (no rigged model returned)'}`);
 }
 
-function isTimeout(err: unknown): boolean {
-  return err instanceof Error && err.name === 'PollTimeout';
-}
 
-async function estimateCost(endpointId: string, units: number): Promise<number | undefined> {
-  try {
-    const est = await api.estimate(endpointId, Math.max(1, units));
-    return est.costUSD ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
 
-async function pollStatus(
-  endpointId: string,
-  requestId: string,
-  onTick: (s: StatusResponse) => void,
-  intervalMs = 5000,
-  timeoutMs = 20 * 60 * 1000,
-): Promise<StatusResponse> {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const s = await api.getStatus(endpointId, requestId);
-    onTick(s);
-    if (s.status === 'SUCCEEDED' || s.status === 'FAILED' || s.status === 'UNKNOWN') {
-      return s;
-    }
-    await new Promise((r) => setTimeout(r, intervalMs));
-  }
-  const err = new Error(`Request ${requestId} timed out after ${timeoutMs / 1000}s`);
-  err.name = 'PollTimeout';
-  throw err;
-}
