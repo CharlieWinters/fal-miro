@@ -85,7 +85,7 @@ export function PanoramaToImageScreen({ itemId, onClose }: { itemId: string; onC
     const ro = new ResizeObserver(recomputeFrame);
     ro.observe(stage);
     return () => ro.disconnect();
-  }, [recomputeFrame]);
+  }, [recomputeFrame, src]); // re-run once the stage mounts (it renders only after src resolves)
 
   // Set up the three.js photosphere once we have the image + a mount point.
   useEffect(() => {

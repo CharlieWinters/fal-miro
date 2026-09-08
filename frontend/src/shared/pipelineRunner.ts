@@ -21,6 +21,7 @@ import {
   findPipelineRunByRequestId,
   getActiveJobs,
   removeActiveJob,
+  setItemGenerationSettings,
   updatePipelineRun,
   type ActiveJob,
   type PipelineRun,
@@ -35,6 +36,20 @@ import {
 } from './boardHelpers';
 import { placeGenericOutput } from './genericOutput';
 import { parseFalInputSchema, pickAspectRatioField } from './schema';
+import { estimateCostUSD, reportedInferenceSeconds } from './cost';
+
+/** Board item ids a run was built from: every id-shaped string in fixedInputs. */
+export function pipelineParentIds(fixedInputs: Record<string, unknown>): string[] {
+  const ids: string[] = [];
+  const consider = (v: unknown) => {
+    if (typeof v === 'string' && /^\d{12,}$/.test(v)) ids.push(v);
+  };
+  for (const v of Object.values(fixedInputs)) {
+    if (Array.isArray(v)) v.forEach(consider);
+    else consider(v);
+  }
+  return Array.from(new Set(ids));
+}
 
 const DEFAULT_RATIO = '1:1';
 
@@ -164,6 +179,19 @@ export async function advancePipelineForJob(job: ActiveJob, status: StatusRespon
         url: outputUrl,
       });
       outputItemId = placed.itemId;
+      // Same stamp every single-model agent leaves: what ran, at what cost,
+      // and from which board items — so pipeline outputs show up in cost
+      // totals and lineage like everything else.
+      const priorOutputs = run.steps
+        .slice(0, stepIndex)
+        .map((s) => s.outputItemId)
+        .filter((id): id is string => Boolean(id));
+      const parents = Array.from(new Set([...pipelineParentIds(run.fixedInputs), ...priorOutputs]));
+      await setItemGenerationSettings(outputItemId, {
+        ...job.settings,
+        costUSD: await estimateCostUSD(job.endpointId, { units: 1, seconds: reportedInferenceSeconds(status.data) }),
+        ...(parents.length ? { parents } : {}),
+      });
     }
     run.steps[stepIndex] = { ...run.steps[stepIndex], status: 'done', outputUrl, outputItemId };
     await updatePipelineRun(run.id, { steps: run.steps });

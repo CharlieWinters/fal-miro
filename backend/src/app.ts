@@ -48,11 +48,23 @@ app.use('/api/fal/*', async (c, next) => {
   if (!backendKey) {
     return c.json({ error: 'This deployment has no BACKEND_KEY configured — set one before use.' }, 500);
   }
-  if (c.req.header('x-fal-proxy-key') !== backendKey) {
+  if (!constantTimeEqual(c.req.header('x-fal-proxy-key') ?? '', backendKey)) {
     return c.json({ error: 'Unauthorized' }, 401);
   }
   return next();
 });
+
+/** Compare two secrets without leaking where they first differ. Length is
+ * compared as part of the same pass, and the loop always runs over the longer
+ * string, so the time taken does not depend on the position of a mismatch. */
+export function constantTimeEqual(a: string, b: string): boolean {
+  const len = Math.max(a.length, b.length);
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < len; i++) {
+    diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  }
+  return diff === 0;
+}
 
 /** The fal client keeps its credentials in module-level state; (re)configure
  * it at the top of every handler that calls it, since on Workers the key only
@@ -64,9 +76,13 @@ function configureFal(falKey: string | undefined): void {
 // ---------------------------------------------------------------------------
 // Health
 // ---------------------------------------------------------------------------
+// Anonymous: says only that the process is up. Which keys are configured is
+// useful to the operator but is reconnaissance for anyone else, so that part
+// is only reported to a caller holding BACKEND_KEY.
 app.get('/healthz', (c) => {
-  const { falKey, adminKey } = resolveEnv(c);
-  return c.json({ ok: true, hasKey: Boolean(falKey), hasAdminKey: Boolean(adminKey) });
+  const { falKey, adminKey, backendKey } = resolveEnv(c);
+  const trusted = Boolean(backendKey) && constantTimeEqual(c.req.header('x-fal-proxy-key') ?? '', backendKey ?? '');
+  return c.json(trusted ? { ok: true, hasKey: Boolean(falKey), hasAdminKey: Boolean(adminKey) } : { ok: true });
 });
 
 // Note: /embed/video, /embed/audio, /embed/3d, /embed/rig, /embed/panorama
@@ -84,9 +100,11 @@ app.get('/healthz', (c) => {
 //   • "Video Player → Image" loads a .mp4 into a <video crossorigin> and draws
 //     the current frame to a canvas.
 // The browser taints those canvases unless the asset was fetched
-// cross-origin-clean, and Fal's CDN doesn't ship CORS headers — so both load
-// through here. `Range` is forwarded (with the key headers mirrored back) so
-// video seeking / scrubbing works.
+// cross-origin-clean. Fal's CDN does send Access-Control-Allow-Origin (the
+// embed pages rely on it), but the capture tools load through here so the
+// asset is same-origin to the modal regardless of which CDN host or headers a
+// given output comes with. `Range` is forwarded (with the key headers mirrored
+// back) so video seeking / scrubbing works.
 //
 // Built on fetch() + ReadableStream (not node:http/https) so it runs
 // unchanged on Node, Cloudflare Workers, or any other fetch-based runtime.
@@ -100,40 +118,93 @@ app.get('/healthz', (c) => {
 //
 //   GET /proxy?url=<encoded url>
 // ---------------------------------------------------------------------------
-function isAllowedProxyHost(hostname: string): boolean {
+export function isAllowedProxyHost(hostname: string): boolean {
   return hostname === 'fal.media' || hostname.endsWith('.fal.media');
 }
 
-app.get('/proxy', async (c) => {
-  const target = c.req.query('url') ?? '';
+/** A URL the proxy may fetch: http(s) on Fal's media CDN. */
+export function isAllowedProxyUrl(raw: string): URL | null {
   let parsed: URL;
   try {
-    parsed = new URL(target);
+    parsed = new URL(raw);
   } catch {
-    return c.json({ error: 'Missing or invalid url' }, 400);
+    return null;
   }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return c.json({ error: 'Invalid scheme' }, 400);
-  }
-  if (!isAllowedProxyHost(parsed.hostname)) {
-    return c.json({ error: `Host "${parsed.hostname}" is not allowed — only Fal's media CDN can be proxied.` }, 400);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+  if (!isAllowedProxyHost(parsed.hostname)) return null;
+  return parsed;
+}
+
+// Only media gets relayed. fal.media hosts every Fal user's uploads, so the
+// host check alone does not say anything about the *content* — without this,
+// anyone with a Fal account could serve an HTML page from this backend's own
+// origin. The list covers what the capture tools actually load: images,
+// video, audio, glTF/GLB, and the octet-stream some CDNs use for .glb.
+const PROXY_CONTENT_TYPES = [
+  /^image\//,
+  /^video\//,
+  /^audio\//,
+  /^model\/gltf/,
+  /^application\/octet-stream$/,
+];
+export function isProxyableContentType(contentType: string | null): boolean {
+  const mime = (contentType ?? '').split(';')[0].trim().toLowerCase();
+  if (!mime) return false;
+  return PROXY_CONTENT_TYPES.some((re) => re.test(mime));
+}
+
+/** Refuse to relay anything larger than this (when the upstream says how big it is). */
+export const PROXY_MAX_BYTES = 512 * 1024 * 1024;
+const PROXY_MAX_REDIRECTS = 3;
+
+app.get('/proxy', async (c) => {
+  const target = c.req.query('url') ?? '';
+  let parsed = isAllowedProxyUrl(target);
+  if (!parsed) {
+    return c.json({ error: 'url must be an http(s) URL on Fal\'s media CDN — nothing else can be proxied.' }, 400);
   }
 
   const range = c.req.header('range');
   const upstreamHeaders: Record<string, string> = { 'User-Agent': 'fal-miro-proxy/1' };
   if (range) upstreamHeaders.Range = range;
 
+  // Follow redirects by hand so every hop is held to the same host allowlist
+  // as the first — fetch's default would happily follow fal.media to anywhere.
   let upstream: Response;
   try {
-    upstream = await fetch(target, { headers: upstreamHeaders });
+    let hops = 0;
+    for (;;) {
+      upstream = await fetch(parsed.href, { headers: upstreamHeaders, redirect: 'manual' });
+      const location = upstream.headers.get('location');
+      if (upstream.status < 300 || upstream.status >= 400 || !location) break;
+      if (++hops > PROXY_MAX_REDIRECTS) return c.json({ error: 'Too many redirects' }, 502);
+      const next = isAllowedProxyUrl(new URL(location, parsed).href);
+      if (!next) return c.json({ error: 'Upstream redirected outside Fal\'s media CDN' }, 502);
+      parsed = next;
+    }
   } catch (err) {
     console.error('[proxy] upstream error:', messageOf(err));
     return c.json({ error: messageOf(err) }, 502);
   }
 
+  if (upstream.ok) {
+    if (!isProxyableContentType(upstream.headers.get('content-type'))) {
+      return c.json({ error: 'Upstream is not a media type this proxy relays' }, 415);
+    }
+    const length = Number(upstream.headers.get('content-length'));
+    if (length > PROXY_MAX_BYTES) {
+      return c.json({ error: 'Upstream asset is too large to relay' }, 413);
+    }
+  }
+
   const headers = new Headers();
   headers.set('Access-Control-Allow-Origin', '*');
   headers.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges, Content-Type');
+  // Whatever the bytes are, the browser must not treat them as a document
+  // from this origin: no sniffing, no scripts, no frames.
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('Content-Security-Policy', "default-src 'none'; sandbox");
+  headers.set('Content-Disposition', 'inline');
   for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag']) {
     const v = upstream.headers.get(h);
     if (v != null) headers.set(h, v);

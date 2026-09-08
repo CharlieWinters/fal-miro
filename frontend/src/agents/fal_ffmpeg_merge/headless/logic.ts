@@ -17,6 +17,7 @@ import {
 } from '../../../shared/storage';
 import { broadcastUpdate } from '../../../headless/communications';
 import { POLL_BUDGET, pollStatus as sharedPollStatus, shouldLeaveForResume as isTimeout } from '../../../shared/pollStatus';
+import { estimateCostUSD } from '../../../shared/cost';
 
 // Polling lives in shared/pollStatus; this agent only chooses its budget.
 const pollStatus = (endpointId: string, requestId: string, onTick: (s: StatusResponse) => void) =>
@@ -156,7 +157,7 @@ export async function run(payload: unknown, requestId = ''): Promise<FfmpegMerge
       width,
       height,
     });
-    settings.costUSD = await estimateCost(endpointId, 1);
+    settings.costUSD = await estimateCostUSD(endpointId, { units: 1 });
     await setItemGenerationSettings(embed.id, settings);
     await removeActiveJob(falRequestId);
     return { requestId: falRequestId, embedItemId: embed.id, outputUrl };
@@ -173,12 +174,4 @@ export async function run(payload: unknown, requestId = ''): Promise<FfmpegMerge
 }
 
 
-async function estimateCost(endpointId: string, units: number): Promise<number | undefined> {
-  try {
-    const est = await api.estimate(endpointId, Math.max(1, units));
-    return est.costUSD ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
 

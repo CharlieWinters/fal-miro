@@ -85,7 +85,7 @@ export function ThreeDViewerToImageScreen({ itemId, onClose }: { itemId: string;
     const ro = new ResizeObserver(recomputeFrame);
     ro.observe(stage);
     return () => ro.disconnect();
-  }, [recomputeFrame]);
+  }, [recomputeFrame, src]); // re-run once the stage mounts (it renders only after src resolves)
 
   useEffect(() => {
     const el = viewerRef.current;

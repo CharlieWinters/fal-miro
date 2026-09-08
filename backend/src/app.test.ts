@@ -9,7 +9,7 @@ const queue = vi.hoisted(() => ({
 }));
 vi.mock('@fal-ai/client', () => ({ fal: { config: vi.fn(), queue } }));
 
-import { app, terminalStatusFor } from './app.js';
+import { app, constantTimeEqual, isProxyableContentType, terminalStatusFor } from './app.js';
 
 // hono/adapter's env() reads process.env on Node, so that is where the test
 // config has to live (the third argument to app.request is only read on
@@ -137,5 +137,89 @@ describe('CORS', () => {
       { method: 'OPTIONS', headers: { Origin: 'https://evil.example', 'Access-Control-Request-Method': 'GET' } },
     );
     expect(res.headers.get('access-control-allow-origin')).toBeNull();
+  });
+});
+
+describe('GET /proxy relaying', () => {
+  const upstream = (init: { status?: number; headers?: Record<string, string>; body?: string }) =>
+    new Response(init.body ?? 'bytes', { status: init.status ?? 200, headers: init.headers ?? {} });
+
+  it('relays media with hardening headers and CORS', async () => {
+    const fetchMock = vi.fn(async () => upstream({ headers: { 'content-type': 'model/gltf-binary', 'content-length': '5' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await app.request('/proxy?url=' + encodeURIComponent('https://v3.fal.media/files/x.glb'));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('content-security-policy')).toContain("default-src 'none'");
+    expect((fetchMock.mock.calls[0] as unknown[])[1]).toMatchObject({ redirect: 'manual' });
+    vi.unstubAllGlobals();
+  });
+
+  it('refuses to relay a non-media content type from the CDN', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => upstream({ headers: { 'content-type': 'text/html; charset=utf-8' }, body: '<script>1</script>' })));
+    const res = await app.request('/proxy?url=' + encodeURIComponent('https://v3.fal.media/files/evil.html'));
+    expect(res.status).toBe(415);
+    vi.unstubAllGlobals();
+  });
+
+  it('refuses an oversized asset', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => upstream({ headers: { 'content-type': 'video/mp4', 'content-length': String(2 * 1024 ** 3) } })));
+    const res = await app.request('/proxy?url=' + encodeURIComponent('https://v3.fal.media/files/huge.mp4'));
+    expect(res.status).toBe(413);
+    vi.unstubAllGlobals();
+  });
+
+  it('follows a redirect only while it stays on the CDN', async () => {
+    const seen: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        seen.push(url);
+        if (url.endsWith('/a.glb')) return upstream({ status: 302, headers: { location: 'https://v3b.fal.media/files/b.glb' } });
+        return upstream({ headers: { 'content-type': 'model/gltf-binary' } });
+      }),
+    );
+    const ok = await app.request('/proxy?url=' + encodeURIComponent('https://v3.fal.media/files/a.glb'));
+    expect(ok.status).toBe(200);
+    expect(seen).toEqual(['https://v3.fal.media/files/a.glb', 'https://v3b.fal.media/files/b.glb']);
+    vi.unstubAllGlobals();
+
+    vi.stubGlobal('fetch', vi.fn(async () => upstream({ status: 302, headers: { location: 'https://169.254.169.254/latest/meta-data' } })));
+    const bad = await app.request('/proxy?url=' + encodeURIComponent('https://v3.fal.media/files/a.glb'));
+    expect(bad.status).toBe(502);
+    vi.unstubAllGlobals();
+  });
+
+  it('classifies content types', () => {
+    expect(isProxyableContentType('image/png')).toBe(true);
+    expect(isProxyableContentType('video/mp4')).toBe(true);
+    expect(isProxyableContentType('audio/mpeg')).toBe(true);
+    expect(isProxyableContentType('model/gltf-binary')).toBe(true);
+    expect(isProxyableContentType('application/octet-stream')).toBe(true);
+    expect(isProxyableContentType('text/html')).toBe(false);
+    expect(isProxyableContentType('application/javascript')).toBe(false);
+    expect(isProxyableContentType('image/svg+xml')).toBe(true); // image/*, still no scripts thanks to CSP sandbox
+    expect(isProxyableContentType(null)).toBe(false);
+  });
+});
+
+describe('healthz and key comparison', () => {
+  it('tells anonymous callers only that it is up', async () => {
+    const res = await app.request('/healthz');
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it('tells a caller holding the key which keys are configured', async () => {
+    const res = await app.request('/healthz', { headers: authed });
+    expect(await res.json()).toEqual({ ok: true, hasKey: true, hasAdminKey: false });
+  });
+
+  it('compares keys in constant time semantics', () => {
+    expect(constantTimeEqual('abc', 'abc')).toBe(true);
+    expect(constantTimeEqual('abc', 'abd')).toBe(false);
+    expect(constantTimeEqual('abc', 'ab')).toBe(false);
+    expect(constantTimeEqual('', '')).toBe(true);
+    expect(constantTimeEqual('', 'a')).toBe(false);
   });
 });

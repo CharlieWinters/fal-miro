@@ -25,6 +25,7 @@ import { bindReferences, type Ref } from '../../../shared/referenceBinding';
 import { parseFalInputSchema, pickAspectRatioField } from '../../../shared/schema';
 import { broadcastUpdate } from '../../../headless/communications';
 import { POLL_BUDGET, pollStatus as sharedPollStatus, shouldLeaveForResume as isTimeout } from '../../../shared/pollStatus';
+import { estimateCostUSD } from '../../../shared/cost';
 
 // Polling lives in shared/pollStatus; this agent only chooses its budget.
 const pollStatus = (endpointId: string, requestId: string, onTick: (s: StatusResponse) => void) =>
@@ -314,7 +315,7 @@ export async function run(payload: unknown, requestId = ''): Promise<ImageGenRes
   const outputUrl = final.output?.[0];
   if (final.status === 'SUCCEEDED' && outputUrl) {
     await replaceImageContent(placeholderId, outputUrl, finishedTitle, { x: targetX, y: targetY });
-    settings.costUSD = await estimateCost(endpointId, Number(finalInput.num_images) || 1);
+    settings.costUSD = await estimateCostUSD(endpointId, { units: Number(finalInput.num_images) || 1 });
     await setItemGenerationSettings(placeholderId, settings);
     await removeActiveJob(falRequestId);
     return { requestId: falRequestId, imageItemId: placeholderId, outputUrl };
@@ -335,13 +336,4 @@ function isEmpty(v: unknown): boolean {
 }
 
 
-/** Best-effort cost estimate (USD); undefined on any error. */
-export async function estimateCost(endpointId: string, units: number): Promise<number | undefined> {
-  try {
-    const est = await api.estimate(endpointId, Math.max(1, units));
-    return est.costUSD ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
 

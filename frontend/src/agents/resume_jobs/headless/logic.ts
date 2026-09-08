@@ -126,7 +126,12 @@ async function finalize(job: ActiveJob, s: StatusResponse): Promise<void> {
         const clip = clips[i];
         const x = baseX + i * (width + gapX);
         const embed = await createEmbedAtPosition({ url: rigEmbedUrl(clip.url), x, y: baseY, width, height });
-        await setItemGenerationSettings(embed.id, { ...settings, animations: [clip] });
+        // Cost on the first clip only, as in fal_rig's live path.
+        await setItemGenerationSettings(embed.id, {
+          ...settings,
+          ...(i > 0 ? { costUSD: undefined } : {}),
+          animations: [clip],
+        });
       }
     } else if (job.kind === 'video' || job.kind === 'model3d' || job.kind === 'panorama') {
       // Swap the placeholder image for an inline embed (video player, 3D
