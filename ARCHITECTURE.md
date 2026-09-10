@@ -140,7 +140,13 @@ auto-detected from the selected source image's dimensions (still overridable).
   comma) extracts the asset id. The image screen shows it as an editable
   "Asset name" field with a settings disclosure to tune the pattern.
 - **`resume_jobs`** — runs on board load from `headless/index.ts`; finalizes or
-  re-polls anything left in flight.
+  re-polls anything left in flight. A status check that *throws* is backed off
+  and retried on later loads (`agents/resume_jobs/retryPolicy.ts`: exponential
+  with jitter, recorded per job as `resumeAttempts`/`nextRetryAt` in the
+  ledger), and **retired** once it runs out of attempts or outlives its own
+  agent's poll budget — at which point the placeholder is marked failed instead
+  of being left claiming to generate. Without that retirement rule a job Fal
+  never accepted is re-checked on every board load for the life of the board.
 - **Board helpers / storage** (`shared/boardHelpers.ts`, `shared/storage.ts`) —
   placeholder placement, frame-aware coordinates, the active-job ledger.
 - **Panel** — searchable model home → image-gen screen (sticky auto-fill,

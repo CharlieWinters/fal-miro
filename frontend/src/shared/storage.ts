@@ -47,6 +47,12 @@ export type ActiveJob = {
    *  its normal single-model finalize. */
   pipelineRunId?: string;
   stepIndex?: number;
+  /** How many board loads in a row have failed to reach this job's status, and
+   *  the earliest time it is worth asking again. Written by resume_jobs so a
+   *  flaky backend gets backed off instead of hammered, and a job that will
+   *  never answer is eventually retired rather than retried forever. */
+  resumeAttempts?: number;
+  nextRetryAt?: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -164,6 +170,15 @@ export async function addActiveJob(job: ActiveJob): Promise<void> {
 export async function removeActiveJob(requestId: string): Promise<void> {
   const jobs = (await getActiveJobs()).filter((j) => j.requestId !== requestId);
   await saveActiveJobs(jobs);
+}
+
+/** Patch one job in the ledger, leaving the rest untouched. Used by resume_jobs
+ *  to record retry bookkeeping; a `undefined` in the patch clears the field,
+ *  since saveActiveJobs strips undefined before writing. */
+export async function updateActiveJob(requestId: string, patch: Partial<ActiveJob>): Promise<void> {
+  const jobs = await getActiveJobs();
+  if (!jobs.some((j) => j.requestId === requestId)) return;
+  await saveActiveJobs(jobs.map((j) => (j.requestId === requestId ? { ...j, ...patch } : j)));
 }
 
 export async function getPipelineRuns(): Promise<PipelineRun[]> {

@@ -296,7 +296,7 @@ app.get('/api/fal/status/:requestId', async (c) => {
     // terminal answer about the job, not a problem reaching Fal — so return it
     // as a status the pollers can finish on, rather than as an HTTP error they
     // would keep retrying (and re-hitting on every board load) forever.
-    const terminal = terminalStatusFor(e?.status);
+    const terminal = terminalStatusFor(e?.status) ?? (isTerminalFalError(err) ? 'FAILED' : null);
     if (terminal) {
       return c.json({
         requestId: c.req.param('requestId'),
@@ -315,6 +315,22 @@ export function terminalStatusFor(httpStatus: unknown): 'FAILED' | 'UNKNOWN' | n
   if (httpStatus === 400 || httpStatus === 422) return 'FAILED';
   if (httpStatus === 404) return 'UNKNOWN';
   return null;
+}
+
+/** Terminal despite the HTTP status: a request Fal *accepted* onto the queue and
+ * then rejected when it ran (a missing or malformed input field) surfaces as an
+ * error carrying a validation `detail` payload, on whatever status Fal picked —
+ * observed in the wild as a 5xx, which `terminalStatusFor` reads as transient.
+ * Left unclassified, that one job is retried by every future board load forever
+ * and its placeholder sits on the board saying "Generating…" for good, so treat
+ * a validation payload as the terminal answer it is. */
+export function isTerminalFalError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { name?: unknown; body?: { detail?: unknown } };
+  if (e.name === 'ValidationError') return true;
+  const detail = e.body?.detail;
+  if (Array.isArray(detail)) return detail.length > 0;
+  return typeof detail === 'object' && detail !== null;
 }
 
 // ---------------------------------------------------------------------------
