@@ -1,5 +1,6 @@
 import { api, videoEmbedUrl, model3dEmbedUrl, panoramaEmbedUrl, rigEmbedUrl, type StatusResponse } from '../../../lib/api';
-import { POLL_BUDGET, isTerminal, pollStatus, shouldLeaveForResume } from '../../../shared/pollStatus';
+import { isTerminal, pollStatus, shouldLeaveForResume } from '../../../shared/pollStatus';
+import { budgetFor, isBackingOff, isResumeExhausted, nextRetryDelayMs } from '../retryPolicy';
 import {
   createEmbedAtPosition,
   deleteItem,
@@ -12,6 +13,7 @@ import {
   getActiveJobs,
   removeActiveJob,
   setItemGenerationSettings,
+  updateActiveJob,
   type ActiveJob,
 } from '../../../shared/storage';
 import { extractAnimations, extractRestPose } from '../../../shared/meshyAnimations';
@@ -27,30 +29,80 @@ import { advancePipelineForJob } from '../../../shared/pipelineRunner';
  * Invoked on board load from headless/index.ts, so generations survive the
  * user closing and re-opening the board.
  */
-export async function run(_payload: unknown): Promise<{ resumed: number; finalized: number }> {
+export async function run(
+  _payload: unknown,
+): Promise<{ resumed: number; finalized: number; retried: number; retired: number; deferred: number }> {
   const jobs = await getActiveJobs();
-  if (jobs.length === 0) return { resumed: 0, finalized: 0 };
+  if (jobs.length === 0) return { resumed: 0, finalized: 0, retried: 0, retired: 0, deferred: 0 };
 
   console.log(`[resume_jobs] resuming ${jobs.length} active job(s)`);
 
+  const now = Date.now();
   let finalized = 0;
+  let retried = 0;
+  let retired = 0;
+  let deferred = 0;
+
   for (const job of jobs) {
+    // Backing off from an earlier failed check — leave it for a later load
+    // rather than re-hitting a backend we already know is not answering.
+    if (isBackingOff(job, now)) {
+      deferred += 1;
+      continue;
+    }
+
     try {
       const s = await api.getStatus(job.endpointId, job.requestId);
       if (isTerminal(s.status)) {
         await finalize(job, s);
         finalized += 1;
       } else {
+        // Reachable again — clear any backoff so a later hiccup starts fresh.
+        if (job.resumeAttempts) {
+          await updateActiveJob(job.requestId, { resumeAttempts: undefined, nextRetryAt: undefined });
+        }
         void pollUntilDone(job).catch((e) =>
           console.warn(`[resume_jobs] poll failed for ${job.requestId}:`, e),
         );
       }
     } catch (e) {
-      console.warn(`[resume_jobs] could not check request ${job.requestId}:`, e);
+      const attempts = (job.resumeAttempts ?? 0) + 1;
+      if (isResumeExhausted(job, attempts, now)) {
+        console.warn(`[resume_jobs] giving up on ${job.requestId} after ${attempts} attempt(s):`, e);
+        await retire(job);
+        retired += 1;
+      } else {
+        const delay = nextRetryDelayMs(attempts);
+        console.warn(
+          `[resume_jobs] could not check ${job.requestId} (attempt ${attempts}), ` +
+            `next try in ~${Math.round(delay / 1000)}s:`,
+          e,
+        );
+        await updateActiveJob(job.requestId, { resumeAttempts: attempts, nextRetryAt: now + delay });
+        retried += 1;
+      }
     }
   }
 
-  return { resumed: jobs.length, finalized };
+  return { resumed: jobs.length, finalized, retried, retired, deferred };
+}
+
+/** Stop tracking a job that is never going to answer — and say so on the board,
+ *  rather than leaving a placeholder that claims to be generating for good. */
+async function retire(job: ActiveJob): Promise<void> {
+  try {
+    if (await placeholderPresent(job)) {
+      await replaceImageContent(
+        job.placeholderId,
+        makePlaceholderDataUrl(job.settings.ratio, 'Failed'),
+        'Fal · Unreachable',
+        job.targetPosition,
+      );
+    }
+  } catch (e) {
+    console.warn(`[resume_jobs] could not mark ${job.requestId} as failed:`, e);
+  }
+  await removeActiveJob(job.requestId);
 }
 
 /** Does the job's placeholder still exist on the board? */
@@ -169,25 +221,6 @@ async function finalize(job: ActiveJob, s: StatusResponse): Promise<void> {
     );
   }
   await removeActiveJob(job.requestId);
-}
-
-/** The same budget the job's own agent would have given it. */
-function budgetFor(kind: ActiveJob['kind']) {
-  switch (kind) {
-    case 'image':
-      return POLL_BUDGET.image;
-    case 'video':
-    case 'audio':
-      return POLL_BUDGET.video;
-    case 'model3d':
-      return POLL_BUDGET.model3d;
-    case 'rig':
-      return POLL_BUDGET.rig;
-    case 'panorama':
-      return POLL_BUDGET.panorama;
-    default:
-      return POLL_BUDGET.generic;
-  }
 }
 
 async function pollUntilDone(job: ActiveJob): Promise<void> {

@@ -9,7 +9,13 @@ const queue = vi.hoisted(() => ({
 }));
 vi.mock('@fal-ai/client', () => ({ fal: { config: vi.fn(), queue } }));
 
-import { app, constantTimeEqual, isProxyableContentType, terminalStatusFor } from './app.js';
+import {
+  app,
+  constantTimeEqual,
+  isProxyableContentType,
+  isTerminalFalError,
+  terminalStatusFor,
+} from './app.js';
 
 // hono/adapter's env() reads process.env on Node, so that is where the test
 // config has to live (the third argument to app.request is only read on
@@ -92,6 +98,19 @@ describe('GET /api/fal/status', () => {
     expect(res.status).toBe(502);
   });
 
+  it('reports a queued request that fails input validation as FAILED, even on a 5xx', async () => {
+    // Observed in the wild: Fal accepts the request onto the queue, then
+    // rejects it when it runs ("image_urls: Field required") and reports that
+    // on a status outside the 4xx set. Read as transient, that one job was
+    // retried by every subsequent board load forever.
+    queue.status.mockRejectedValue(
+      falError(500, [{ type: 'missing', msg: 'Field required', loc: ['body', 'image_urls'] }]),
+    );
+    const res = await app.request('/api/fal/status/r1?endpointId=fal-ai/x', { headers: authed });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { status: string }).status).toBe('FAILED');
+  });
+
   it('classifies HTTP statuses', () => {
     expect(terminalStatusFor(422)).toBe('FAILED');
     expect(terminalStatusFor(400)).toBe('FAILED');
@@ -99,6 +118,18 @@ describe('GET /api/fal/status', () => {
     expect(terminalStatusFor(429)).toBeNull();
     expect(terminalStatusFor(500)).toBeNull();
     expect(terminalStatusFor(undefined)).toBeNull();
+  });
+
+  it('classifies terminal Fal errors that the HTTP status alone would miss', () => {
+    expect(isTerminalFalError(falError(500, [{ msg: 'Field required' }]))).toBe(true);
+    expect(isTerminalFalError(falError(500, { image_urls: 'Field required' }))).toBe(true);
+    expect(isTerminalFalError(Object.assign(new Error('bad'), { name: 'ValidationError' }))).toBe(true);
+    // A genuinely transient failure must stay retryable.
+    expect(isTerminalFalError(falError(503))).toBe(false);
+    expect(isTerminalFalError(falError(500, []))).toBe(false);
+    expect(isTerminalFalError(new Error('socket hang up'))).toBe(false);
+    expect(isTerminalFalError(null)).toBe(false);
+    expect(isTerminalFalError('nope')).toBe(false);
   });
 });
 
