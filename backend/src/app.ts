@@ -296,7 +296,7 @@ app.get('/api/fal/status/:requestId', async (c) => {
     // terminal answer about the job, not a problem reaching Fal — so return it
     // as a status the pollers can finish on, rather than as an HTTP error they
     // would keep retrying (and re-hitting on every board load) forever.
-    const terminal = terminalStatusFor(e?.status);
+    const terminal = terminalStatusFor(e?.status, Boolean(e?.body?.detail));
     if (terminal) {
       return c.json({
         requestId: c.req.param('requestId'),
@@ -309,12 +309,30 @@ app.get('/api/fal/status/:requestId', async (c) => {
   }
 });
 
-/** Map a Fal status/result HTTP error to a terminal job status, or null if it
- * is transient (network, 429, 5xx) and worth retrying. */
-export function terminalStatusFor(httpStatus: unknown): 'FAILED' | 'UNKNOWN' | null {
-  if (httpStatus === 400 || httpStatus === 422) return 'FAILED';
+/**
+ * Map a Fal status/result HTTP error to a terminal job status, or null if it is
+ * transient (network, rate limit, an unexplained 5xx) and worth retrying.
+ *
+ * `hasModelDetail` says whether the error carried a model-level `detail` body.
+ * That is the signal that Fal *reached* the model and the model refused the
+ * job, which is terminal whatever status code it arrives under — Bria's
+ * ad-delayer refuses an image over 800 px per dimension with a 500, and reading
+ * that as transient had the caller retrying a hopeless job on every board load.
+ *
+ * The codes listed as always-retryable are about our own call rather than the
+ * job: a rejected or throttled key says nothing about whether the generation
+ * would have worked, so those stay transient even with a detail body.
+ */
+const CALLER_FAULT_STATUSES = new Set([401, 403, 408, 429]);
+
+export function terminalStatusFor(
+  httpStatus: unknown,
+  hasModelDetail = false,
+): 'FAILED' | 'UNKNOWN' | null {
   if (httpStatus === 404) return 'UNKNOWN';
-  return null;
+  if (httpStatus === 400 || httpStatus === 422) return 'FAILED';
+  if (typeof httpStatus !== 'number' || CALLER_FAULT_STATUSES.has(httpStatus)) return null;
+  return hasModelDetail && httpStatus >= 400 ? 'FAILED' : null;
 }
 
 // ---------------------------------------------------------------------------

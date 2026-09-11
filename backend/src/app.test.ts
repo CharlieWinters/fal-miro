@@ -92,6 +92,20 @@ describe('GET /api/fal/status', () => {
     expect(res.status).toBe(502);
   });
 
+  it('reports a model refusal as FAILED even when Fal answers 500', async () => {
+    // Bria's ad-delayer refuses an oversized image this way. Read as transient,
+    // it had the caller retrying on every board load forever.
+    queue.status.mockResolvedValue({ status: 'COMPLETED' });
+    queue.result.mockRejectedValue(
+      falError(500, 'Image exceeds 800 px per dimension on this endpoint. Resize the source image.'),
+    );
+    const res = await app.request('/api/fal/status/r1?endpointId=fal-ai/x', { headers: authed });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.status).toBe('FAILED');
+    expect(String(body.error)).toMatch(/800 px/);
+  });
+
   it('classifies HTTP statuses', () => {
     expect(terminalStatusFor(422)).toBe('FAILED');
     expect(terminalStatusFor(400)).toBe('FAILED');
@@ -99,6 +113,18 @@ describe('GET /api/fal/status', () => {
     expect(terminalStatusFor(429)).toBeNull();
     expect(terminalStatusFor(500)).toBeNull();
     expect(terminalStatusFor(undefined)).toBeNull();
+  });
+
+  it('treats any model-level detail as terminal, except when the fault is ours', () => {
+    // A `detail` body means Fal reached the model and the model refused.
+    expect(terminalStatusFor(500, true)).toBe('FAILED');
+    expect(terminalStatusFor(424, true)).toBe('FAILED');
+    expect(terminalStatusFor(503, true)).toBe('FAILED');
+    // Our key or our pacing — says nothing about the job, so keep retrying.
+    for (const s of [401, 403, 408, 429]) expect(terminalStatusFor(s, true), String(s)).toBeNull();
+    // No detail: an unexplained 5xx is still just upstream trouble.
+    expect(terminalStatusFor(503, false)).toBeNull();
+    expect(terminalStatusFor(undefined, true)).toBeNull();
   });
 });
 
