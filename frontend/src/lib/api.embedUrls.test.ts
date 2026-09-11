@@ -15,11 +15,13 @@ import {
   audioEmbedUrl,
   panoramaEmbedUrl,
   rigEmbedUrl,
+  motionEmbedUrl,
   unwrapVideoEmbedUrl,
   unwrapModel3dEmbedUrl,
   unwrapAudioEmbedUrl,
   unwrapPanoramaEmbedUrl,
   unwrapRigEmbedUrl,
+  unwrapMotionEmbedUrl,
 } from './api';
 
 const PAIRS = [
@@ -28,6 +30,7 @@ const PAIRS = [
   ['audio', audioEmbedUrl, unwrapAudioEmbedUrl, 'https://v3b.fal.media/files/b/x/track.mp3'],
   ['panorama', panoramaEmbedUrl, unwrapPanoramaEmbedUrl, 'https://v3b.fal.media/files/b/x/pano.jpg'],
   ['rig', rigEmbedUrl, unwrapRigEmbedUrl, 'https://v3b.fal.media/files/b/x/running.glb'],
+  ['motion', motionEmbedUrl, unwrapMotionEmbedUrl, 'https://v3b.fal.media/files/b/x/hy_motion_000.fbx'],
 ] as const;
 
 describe.each(PAIRS)('%s embed URL', (_kind, build, unwrap, asset) => {

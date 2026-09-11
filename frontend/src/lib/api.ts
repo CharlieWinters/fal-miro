@@ -302,9 +302,10 @@ export const api = {
 
 // Embed pages ship as static files with the frontend itself (embed-video.html
 // etc, at the project root) — not the backend. None of them need a backend at
-// all: video/audio/3d/rig play the Fal CDN URL directly, and panorama's
-// <a-sky> texture load works cross-origin too (Fal's CDN sends
-// Access-Control-Allow-Origin — verified live against a real generation).
+// all: video/audio/3d/rig play the Fal CDN URL directly, panorama's <a-sky>
+// texture load works cross-origin too, and embed-motion.html's FBXLoader
+// fetches the clip the same way (Fal's CDN sends Access-Control-Allow-Origin
+// — verified live against real generations).
 // That makes these genuinely generic: they render the same regardless of
 // which backend (if any) a given board is using. `import.meta.env.BASE_URL`
 // picks up whatever `base` is configured in vite.config.ts, so this resolves
@@ -362,6 +363,11 @@ export function rigEmbedUrl(glbUrl: string): string {
   return embedPageUrl('embed-rig.html', glbUrl);
 }
 
+/** URL to the static page that plays a Hunyuan Motion .fbx clip on a grid. */
+export function motionEmbedUrl(fbxUrl: string): string {
+  return embedPageUrl('embed-motion.html', fbxUrl);
+}
+
 /**
  * Backend CORS proxy for an asset — used by the modal's capture-to-image
  * tools to snapshot a canvas cleanly. Unlike the embed pages above, this
@@ -410,6 +416,17 @@ export function unwrapPanoramaEmbedUrl(embedUrl: string): string | null {
   try {
     const u = new URL(embedUrl, window.location.origin);
     if (!u.pathname.endsWith('/embed-panorama.html')) return null;
+    return u.searchParams.get('url');
+  } catch {
+    return null;
+  }
+}
+
+/** Extract the underlying .fbx URL from an embed-motion.html URL. */
+export function unwrapMotionEmbedUrl(embedUrl: string): string | null {
+  try {
+    const u = new URL(embedUrl, window.location.origin);
+    if (!u.pathname.endsWith('/embed-motion.html')) return null;
     return u.searchParams.get('url');
   } catch {
     return null;

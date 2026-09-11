@@ -46,6 +46,8 @@ export const POLL_BUDGET = {
   // Hunyuan World's world-gen is slow — give it plenty of headroom.
   panorama: { intervalMs: 5000, timeoutMs: 30 * 60 * 1000 },
   merge: { intervalMs: 4000, timeoutMs: 15 * 60 * 1000 },
+  // A 12 s clip takes a couple of minutes; queueing is the variable part.
+  motion: { intervalMs: 4000, timeoutMs: 15 * 60 * 1000 },
   // Anything at all can come through the generic screen, video and 3D
   // included, so it gets the longest ordinary budget rather than the shortest.
   generic: { intervalMs: 4000, timeoutMs: 20 * 60 * 1000 },

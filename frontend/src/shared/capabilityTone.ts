@@ -16,6 +16,7 @@ export const CAPABILITY_TONE: Record<Capability, string> = {
   model3d: '#6EDB8C',
   panorama: '#47D1C4',
   rig: '#F25A6E',
+  motion: '#FF8A5B',
   merge: '#FFDD33',
   sound: '#FFB454',
   llm: '#7C9CFF',

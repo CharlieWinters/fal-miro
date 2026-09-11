@@ -21,6 +21,7 @@ import { useFirstSelected, useSelectedItems } from '../hooks/useSelection';
 import {
   connectionMode,
   unwrapModel3dEmbedUrl,
+  unwrapMotionEmbedUrl,
   unwrapVideoEmbedUrl,
   unwrapPanoramaEmbedUrl,
   unwrapRigEmbedUrl,
@@ -36,7 +37,8 @@ export type CaptureTool =
   | 'video-to-image'
   | 'panorama-to-image'
   | 'rig-to-image'
-  | 'pose-character';
+  | 'pose-character'
+  | 'motion-to-strip';
 
 const CAPABILITY_VERB: Record<Capability, string> = {
   image: 'Generate Image',
@@ -47,6 +49,7 @@ const CAPABILITY_VERB: Record<Capability, string> = {
   model3d: 'Generate 3D',
   panorama: 'Generate Panorama',
   rig: 'Rig + Animate',
+  motion: 'Generate Motion',
   sound: 'Add Sound',
   merge: 'Merge',
   llm: 'Run LLM',
@@ -209,6 +212,9 @@ export function HomeScreen({
   const hasVideoSelected = captureAvailable && Boolean(selectedEmbed?.url && unwrapVideoEmbedUrl(selectedEmbed.url));
   const hasPanoramaSelected = captureAvailable && Boolean(selectedEmbed?.url && unwrapPanoramaEmbedUrl(selectedEmbed.url));
   const hasRigSelected = captureAvailable && Boolean(selectedEmbed?.url && unwrapRigEmbedUrl(selectedEmbed.url));
+  // The motion strip loads its FBX straight from fal's CDN (which sends CORS
+  // headers), so it works in client mode too — no /proxy involved.
+  const hasMotionSelected = Boolean(selectedEmbed?.url && unwrapMotionEmbedUrl(selectedEmbed.url));
 
   // Selection-aware settings-card reopen — a Card whose description parses as
   // a recipe (see recipeCard.ts) offers to jump back into its model screen.
@@ -266,7 +272,7 @@ export function HomeScreen({
   const hasSelectionZone =
     Boolean(selectedRecipe) ||
     (Boolean(selectedEmbed) &&
-      (has3dViewerSelected || hasVideoSelected || hasPanoramaSelected || hasRigSelected || sceneAssets.length >= 1));
+      (has3dViewerSelected || hasVideoSelected || hasPanoramaSelected || hasRigSelected || hasMotionSelected || sceneAssets.length >= 1));
 
   return (
     <div className="screen">
@@ -326,6 +332,14 @@ export function HomeScreen({
               title="Pose Character (manual)"
               sub="Rotate individual joints to build a custom pose"
               onOpen={() => onOpenTool('pose-character', selectedEmbed.id)}
+            />
+          )}
+          {selectedEmbed && hasMotionSelected && (
+            <ToolCard
+              capability="motion"
+              title="Motion → Pose strip"
+              sub="Sample the clip into a row of key poses on the board"
+              onOpen={() => onOpenTool('motion-to-strip', selectedEmbed.id)}
             />
           )}
           {sceneAssets.length >= 1 && (

@@ -6,7 +6,7 @@
 import { DEFAULT_ASSET_NAMING, type AssetNamingConfig } from './assetNaming';
 import { DEFAULT_CATALOG_FILTER, type CatalogFilter } from './falCatalog';
 
-export type JobKind = 'image' | 'video' | 'audio' | 'model3d' | 'panorama' | 'rig' | 'generic';
+export type JobKind = 'image' | 'video' | 'audio' | 'model3d' | 'panorama' | 'rig' | 'motion' | 'generic';
 
 export type GenSettings = {
   endpointId: string;

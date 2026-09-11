@@ -44,7 +44,9 @@ key) without conflict.
   the board.
 - **3D & panorama** — e.g. Hunyuan3D, TripoSR (image-to-3D → orbit-able
   `.glb` viewer embed), Hunyuan World (image-to-panorama → 360° photosphere
-  embed), Meshy (rig + animate for posable characters).
+  embed), Meshy (rig + animate for posable characters), Hunyuan Motion
+  (text → skeletal animation, played on a mannequin embed, with a Motion →
+  Pose strip tool that samples it into key-pose images).
 - **Audio** — e.g. ThinkSound, MMAudio, Hunyuan Foley (video → generated
   soundtrack), plus FFmpeg-backed merge utilities (merge videos, merge audio
   + video).

@@ -20,11 +20,14 @@ agent and broadcasts `AGENT_UPDATE` progress back.
 ### Embed pages — a fourth, Miro-SDK-free surface
 
 `embed-video.html`, `embed-audio.html`, `embed-3d.html`, `embed-rig.html`,
-`embed-panorama.html` (project root, alongside `index.html`/`app.html`/
-`modal.html`) are what Miro's embed widget iframes when a generation finishes,
-since Miro has no native video/3D/panorama widget — a `<video>`/`<audio>`/
-`<model-viewer>`/A-Frame `<a-sky>` page that reads a `?url=` query param and
-plays/renders it. Built by `src/lib/api.ts`'s `videoEmbedUrl()` etc.
+`embed-panorama.html`, `embed-motion.html` (project root, alongside
+`index.html`/`app.html`/`modal.html`) are what Miro's embed widget iframes when
+a generation finishes, since Miro has no native video/3D/panorama widget — a
+`<video>`/`<audio>`/`<model-viewer>`/A-Frame `<a-sky>` page that reads a
+`?url=` query param and plays/renders it. Built by `src/lib/api.ts`'s
+`videoEmbedUrl()` etc. The motion page is the one with bundled code
+(`src/embed/motion.ts`, three.js + FBXLoader), because nothing loads FBX
+natively; a boundary rule keeps `src/embed/` free of everything but three.js.
 
 Unlike the three iframes above, these load **no Miro SDK and talk to no
 backend** — every board viewer's browser loads the media straight from Fal's

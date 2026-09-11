@@ -1,4 +1,4 @@
-import { api, videoEmbedUrl, model3dEmbedUrl, panoramaEmbedUrl, rigEmbedUrl, type StatusResponse } from '../../../lib/api';
+import { api, videoEmbedUrl, model3dEmbedUrl, panoramaEmbedUrl, rigEmbedUrl, motionEmbedUrl, type StatusResponse } from '../../../lib/api';
 import { POLL_BUDGET, isTerminal, pollStatus, shouldLeaveForResume } from '../../../shared/pollStatus';
 import {
   createEmbedAtPosition,
@@ -133,7 +133,7 @@ async function finalize(job: ActiveJob, s: StatusResponse): Promise<void> {
           animations: [clip],
         });
       }
-    } else if (job.kind === 'video' || job.kind === 'model3d' || job.kind === 'panorama') {
+    } else if (job.kind === 'video' || job.kind === 'model3d' || job.kind === 'panorama' || job.kind === 'motion') {
       // Swap the placeholder image for an inline embed (video player, 3D
       // viewer, or 360 photosphere — same as the live agents).
       const { width, height } = parseRatio(job.settings.ratio, 720);
@@ -142,7 +142,13 @@ async function finalize(job: ActiveJob, s: StatusResponse): Promise<void> {
       const y = abs?.absoluteY ?? pos?.y ?? 0;
       await deleteItem(job.placeholderId);
       const embedUrl =
-        job.kind === 'model3d' ? model3dEmbedUrl(outputUrl) : job.kind === 'panorama' ? panoramaEmbedUrl(outputUrl) : videoEmbedUrl(outputUrl);
+        job.kind === 'model3d'
+          ? model3dEmbedUrl(outputUrl)
+          : job.kind === 'panorama'
+            ? panoramaEmbedUrl(outputUrl)
+            : job.kind === 'motion'
+              ? motionEmbedUrl(outputUrl)
+              : videoEmbedUrl(outputUrl);
       const embed = await createEmbedAtPosition({ url: embedUrl, x, y, width, height });
       const settings = { ...job.settings };
       // Backfill cost if the live agent never got to stamp it (e.g. the job
@@ -185,6 +191,8 @@ function budgetFor(kind: ActiveJob['kind']) {
       return POLL_BUDGET.rig;
     case 'panorama':
       return POLL_BUDGET.panorama;
+    case 'motion':
+      return POLL_BUDGET.motion;
     default:
       return POLL_BUDGET.generic;
   }
