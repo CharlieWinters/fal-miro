@@ -80,7 +80,6 @@ describe('retargetClip', () => {
       { name: 'L_Elbow', offset: [30, 0, 0] },
       { name: 'L_Wrist', offset: [25, 0, 0] },
     ]);
-    const s = rig(src, 'mannequin');
     const tgt = chain([
       { name: 'Hips', offset: [0, 1.0, 0] },
       { name: 'Spine02', offset: [0, 0.2, 0] },
@@ -89,6 +88,15 @@ describe('retargetClip', () => {
       { name: 'LeftForeArm', offset: [0, -0.3, 0] },
       { name: 'LeftHand', offset: [0, -0.25, 0] },
     ]);
+    // Legs on both rigs, so the hips have several mapped children — a bone
+    // whose aligned rest gets corrupted by one child shows up in the others.
+    const srcLeg = chain([{ name: 'L_Hip', offset: [8, -5, 0] }, { name: 'L_Knee', offset: [0, -40, 0] }, { name: 'L_Ankle', offset: [0, -40, 0] }]);
+    src[0].add(srcLeg[0]);
+    src.push(...srcLeg);
+    const s = rig(src, 'mannequin');
+    const tgtLeg = chain([{ name: 'LeftUpLeg', offset: [0.08, -0.05, 0] }, { name: 'LeftLeg', offset: [0.05, -0.4, 0] }, { name: 'LeftFoot', offset: [0.05, -0.4, 0] }]);
+    tgt[0].add(tgtLeg[0]);
+    tgt.push(...tgtLeg);
     const t = rig(tgt, 'character');
 
     // The clip: L_Shoulder rotates about +Z from 0 to 90°, so the forearm goes from +X to +Y.
@@ -107,18 +115,22 @@ describe('retargetClip', () => {
     srcMixer.clipAction(clip).play();
     const tgtMixer = new THREE.AnimationMixer(t.mesh);
     tgtMixer.clipAction(out).play();
-    const shoulder = src[3];
-    const elbow = src[4];
-    const arm = tgt[3];
-    const forearm = tgt[4];
+    const pairs: Array<[string, THREE.Object3D, THREE.Object3D, THREE.Object3D, THREE.Object3D]> = [
+      ['upper arm', src[3], src[4], tgt[3], tgt[4]],
+      ['forearm', src[4], src[5], tgt[4], tgt[5]],
+      ['thigh', src[6], src[7], tgt[6], tgt[7]],
+      ['shin', src[7], src[8], tgt[7], tgt[8]],
+    ];
     for (const time of [0, 0.5, 0.9]) {
       srcMixer.setTime(time);
       s.root.updateMatrixWorld(true);
       tgtMixer.setTime(time);
       t.root.updateMatrixWorld(true);
-      const want = worldDir(shoulder, elbow);
-      const got = worldDir(arm, forearm);
-      expect(got.dot(want), `t=${time}`).toBeGreaterThan(0.995);
+      for (const [label, sa, sb, ta, tb] of pairs) {
+        const want = worldDir(sa, sb);
+        const got = worldDir(ta, tb);
+        expect(got.dot(want), `${label} t=${time}`).toBeGreaterThan(0.995);
+      }
     }
   });
 

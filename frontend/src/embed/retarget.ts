@@ -165,8 +165,10 @@ export function retargetClip(
 
   const order = [...target.skeleton.bones].sort((a, b) => boneDepth(a) - boneDepth(b));
   const tIndex = new Map(target.skeleton.bones.map((b, i) => [b, i] as const));
+  // Always a fresh quaternion: callers multiply into it, and the stored
+  // per-bone rotations must not be mutated by their children.
   const parentRot = (b: THREE.Bone, boneRot: (p: THREE.Bone) => THREE.Quaternion): THREE.Quaternion =>
-    b.parent && (b.parent as THREE.Bone).isBone ? boneRot(b.parent as THREE.Bone) : rotationOf(b.parent!.matrixWorld);
+    b.parent && (b.parent as THREE.Bone).isBone ? boneRot(b.parent as THREE.Bone).clone() : rotationOf(b.parent!.matrixWorld);
 
   // Rest rotation of each target bone relative to its parent, from the bind pose.
   const restLocal = new Map<THREE.Bone, THREE.Quaternion>();
