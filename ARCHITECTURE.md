@@ -174,6 +174,11 @@ auto-detected from the selected source image's dimensions (still overridable).
   limit, after which the placeholder is resolved and the entry dropped.
 - **Board helpers / storage** (`shared/boardHelpers.ts`, `shared/storage.ts`) —
   placeholder placement, frame-aware coordinates, the active-job ledger.
+- **Source fitting** (`shared/imageResize.ts`) — shrink an image to an
+  endpoint's pixel limit before submitting it, never upscaling. Pixels come
+  from `getImagePixelRef` (a `data:` URI from the SDK, so no CORS and no
+  proxy), and Fal takes a data URI as an image input. Bria's ad-delayer caps a
+  source at 800 px per dimension; a board ad is usually larger.
 - **Panel** — searchable model home → image-gen screen (sticky auto-fill,
   image-size, count) + active-jobs tray.
 - **References → video** (`panel/screens/ReferenceToVideoScreen.tsx`) — select

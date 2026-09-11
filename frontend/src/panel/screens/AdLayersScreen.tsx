@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { startAgentJob } from '../communication';
 import { useFirstSelected } from '../hooks/useSelection';
+import { MAX_AD_SOURCE_PX } from '../../shared/imageResize';
 import type { FalModel } from '../../shared/falCatalog';
 
 type ImageItem = { id: string; title?: string };
@@ -91,6 +92,10 @@ export function AdLayersScreen({ model }: { model: FalModel }) {
         The ad is rebuilt directly below the original at the same size: cutouts as images, copy as text, flat fills
         as shapes, stacked in the model's own order. No frame, so every layer can be dragged or retyped straight
         away. Fonts map to the nearest board font.
+      </div>
+      <div className="hint">
+        This endpoint reads the ad at up to {MAX_AD_SOURCE_PX} px per side, so a larger one is scaled down before
+        it is sent. The rebuild still matches the ad's size on the board.
       </div>
 
       <button
