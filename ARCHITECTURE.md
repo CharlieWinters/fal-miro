@@ -35,6 +35,25 @@ directions to the mannequin's — SkeletonUtils' name-based copy assumes shared
 bone axes and produces a crumpled figure here). `panel/applyMotion.ts` creates
 such an embed from a motion + rig selection; nothing is generated or uploaded.
 
+### Results that are not media
+
+Two models return no media URL at all, so `extractOutputUrls` finds nothing and
+the usual "swap the placeholder for the output" path cannot apply. Both are
+handled by reading `data` instead of `output`:
+
+- **Hunyuan Motion** returns an FBX under `fbx_file` (added to the extractors).
+- **Bria Ad Delayer** returns the ad's *structure* — a canvas plus a z-ordered
+  list of layers with bounding boxes, cutout URLs and typography.
+  `shared/adLayers.ts` plans that into board units (pure, tested) and rebuilds
+  the ad as ordinary board items directly below the source image, at the
+  source's own width: cutouts as images, copy as Miro text, flat fills
+  (including the backdrop) as rectangles, created back-to-front so creation
+  order is the stacking order. No frame around it — the layers stay directly
+  editable, and Miro frames turned out to accept neither `setMetadata` nor a
+  description, so the generation record (endpoint, input, cost, source) goes on
+  the backmost layer instead. It lives in the hull because two agents run it:
+  `fal_ad_layers` live, and `resume_jobs` after a reload.
+
 Unlike the three iframes above, these load **no Miro SDK and talk to no
 backend** — every board viewer's browser loads the media straight from Fal's
 CDN. That's true even for panorama's WebGL sky texture, which needs a

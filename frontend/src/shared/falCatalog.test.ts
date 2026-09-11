@@ -301,3 +301,19 @@ describe('mergeSyncedCatalog — text-to-motion', () => {
     expect(m.screen).toBe('generic');
   });
 });
+
+describe('mergeSyncedCatalog — ad to layers', () => {
+  it('routes Bria Ad Delayer to the layers screen, not the generic image-to-json form', () => {
+    const m = route('bria/ad-delayer', 'image-to-json');
+    expect(m.capability).toBe('layers');
+    expect(m.screen).toBeUndefined();
+    expect(categoryOf(m)).toBe('Ad to Layers');
+  });
+
+  it('leaves other image-to-json models on the generic form, as data rather than images', () => {
+    const m = route('bria/fibo/generate/structured_prompt', 'image-to-json');
+    expect(m.capability).toBe('data');
+    expect(m.screen).toBe('generic');
+    expect(m.category).toBe('Image To Json');
+  });
+});

@@ -10,6 +10,7 @@ import { MergeVideosScreen } from './screens/MergeVideosScreen';
 import { MergeAudioVideoScreen } from './screens/MergeAudioVideoScreen';
 import { RiggingScreen } from './screens/RiggingScreen';
 import { MotionScreen } from './screens/MotionScreen';
+import { AdLayersScreen } from './screens/AdLayersScreen';
 import { SoundScreen } from './screens/SoundScreen';
 import { SketchToTryOnScreen } from '../apps/sketch-to-tryon/Screen';
 import { MaskCreatorScreen } from '../apps/mask-creator/Screen';
@@ -84,6 +85,7 @@ function ModelScreen({ model, seed }: { model: FalModel; seed?: RecipeSeed | nul
   if (isFirstLast(model)) return <FirstLastVideoScreen model={model} />;
   if (model.capability === 'rig') return <RiggingScreen model={model} />;
   if (model.capability === 'motion') return <MotionScreen model={model} />;
+  if (model.capability === 'layers') return <AdLayersScreen model={model} />;
   if (model.capability === 'sound') return <SoundScreen model={model} />;
   if (model.capability === 'merge') {
     return model.endpointId.includes('merge-audio-video') ? (
