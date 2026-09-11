@@ -48,6 +48,8 @@ export const POLL_BUDGET = {
   merge: { intervalMs: 4000, timeoutMs: 15 * 60 * 1000 },
   // A 12 s clip takes a couple of minutes; queueing is the variable part.
   motion: { intervalMs: 4000, timeoutMs: 15 * 60 * 1000 },
+  // Segmentation + OCR + font matching over one image: a minute or two.
+  layers: { intervalMs: 4000, timeoutMs: 15 * 60 * 1000 },
   // Anything at all can come through the generic screen, video and 3D
   // included, so it gets the longest ordinary budget rather than the shortest.
   generic: { intervalMs: 4000, timeoutMs: 20 * 60 * 1000 },

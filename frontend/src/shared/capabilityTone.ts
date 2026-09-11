@@ -17,6 +17,7 @@ export const CAPABILITY_TONE: Record<Capability, string> = {
   panorama: '#47D1C4',
   rig: '#F25A6E',
   motion: '#FF8A5B',
+  layers: '#7CE0D3',
   merge: '#FFDD33',
   sound: '#FFB454',
   llm: '#7C9CFF',

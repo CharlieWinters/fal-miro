@@ -51,6 +51,7 @@ const CAPABILITY_VERB: Record<Capability, string> = {
   panorama: 'Generate Panorama',
   rig: 'Rig + Animate',
   motion: 'Generate Motion',
+  layers: 'Split into Layers',
   sound: 'Add Sound',
   merge: 'Merge',
   llm: 'Run LLM',

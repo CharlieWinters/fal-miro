@@ -18,6 +18,7 @@ import { extractAnimations, extractRestPose } from '../../../shared/meshyAnimati
 import { estimateCostUSD, reportedInferenceSeconds } from '../../../shared/cost';
 import { placeGenericOutput } from '../../../shared/genericOutput';
 import { advancePipelineForJob } from '../../../shared/pipelineRunner';
+import { buildAdLayersFromResult, isAdLayersResult, targetWidthFromRatio } from '../../../shared/adLayers';
 
 /**
  * Walk the persisted active-jobs list and check each one's current status with
@@ -83,6 +84,35 @@ async function finalize(job: ActiveJob, s: StatusResponse): Promise<void> {
   }
 
   const pos = job.targetPosition;
+
+  // Ad-to-layers is the one job whose result is the payload rather than a
+  // media URL, so it is settled before the `outputUrl` checks below — those
+  // would read it as a failure. Same builder as the live agent.
+  if (job.kind === 'layers') {
+    if (s.status === 'SUCCEEDED' && isAdLayersResult(s.data)) {
+      await buildAdLayersFromResult({
+        data: s.data,
+        settings: job.settings,
+        endpointId: job.endpointId,
+        placeholderId: job.placeholderId,
+        // The live agent stored the source ad's board size as the job's ratio.
+        targetWidth: targetWidthFromRatio(job.settings.ratio),
+        sourceImageId: job.settings.parents?.[0],
+        x: pos?.x ?? 0,
+        y: pos?.y ?? 0,
+      });
+    } else {
+      await replaceImageContent(
+        job.placeholderId,
+        makePlaceholderDataUrl(job.settings.ratio, 'Failed'),
+        `Fal · ${s.status}`,
+        pos,
+      );
+    }
+    await removeActiveJob(job.requestId);
+    return;
+  }
+
   const outputUrl = s.output?.[0];
   if (s.status === 'SUCCEEDED' && outputUrl) {
     if (job.kind === 'generic') {
