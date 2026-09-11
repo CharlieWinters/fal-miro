@@ -1,11 +1,13 @@
 import { api, type StatusResponse } from '../../../lib/api';
 import {
   createImageAtAbsolute,
+  getImagePixelRef,
   getImageRef,
   makePlaceholderDataUrl,
   replaceImageContent,
   resolveAbsolutePosition,
 } from '../../../shared/boardHelpers';
+import { MAX_AD_SOURCE_PX, downscaleToLimit } from '../../../shared/imageResize';
 import { addActiveJob, removeActiveJob, type GenSettings } from '../../../shared/storage';
 import { broadcastUpdate } from '../../../headless/communications';
 import { POLL_BUDGET, pollStatus as sharedPollStatus, shouldLeaveForResume as isTimeout } from '../../../shared/pollStatus';
@@ -17,6 +19,40 @@ const pollStatus = (endpointId: string, requestId: string, onTick: (s: StatusRes
 
 /** Gap between the source ad and the rebuilt layers, in board units. */
 const GAP = 120;
+
+/**
+ * The image URL to submit, shrunk to the endpoint's limit if it needs it.
+ *
+ * The endpoint refuses a source over 800 px per dimension, and board ads are
+ * routinely larger, so without this the common case fails. Pixels come from the
+ * board via `getImagePixelRef` (a `data:` URI from the SDK, so no CORS and no
+ * proxy); Fal accepts a data URI as an image input.
+ *
+ * If the image cannot be decoded we submit the original URL rather than
+ * refusing locally — the model's own answer is better than a guess, and this
+ * is no worse than the behaviour before the resize existed.
+ *
+ * None of this affects the rebuilt layout: the returned layer geometry is
+ * relative to the model's own canvas, and `planAdLayers` scales that to the
+ * source ad's width on the board.
+ */
+async function adSourceUrl(sourceImageId: string, fallbackUrl: string, requestId: string): Promise<string> {
+  const pixels = await getImagePixelRef(sourceImageId);
+  if (!pixels?.url) return fallbackUrl;
+  try {
+    const fitted = await downscaleToLimit(pixels.url, MAX_AD_SOURCE_PX);
+    if (!fitted.scaled) return fallbackUrl;
+    broadcastUpdate({
+      requestId,
+      status: 'queued',
+      message: `Resizing the ad to ${fitted.width}×${fitted.height} for this endpoint…`,
+    });
+    return fitted.url;
+  } catch (e) {
+    console.warn('[fal_ad_layers] could not resize the source ad, sending it as-is:', e);
+    return fallbackUrl;
+  }
+}
 
 export type AdLayersPayload = {
   endpointId: string;
@@ -53,7 +89,10 @@ export async function run(payload: unknown, requestId = ''): Promise<AdLayersJob
   broadcastUpdate({ requestId, status: 'queued', message: 'Reading the ad…' });
   const ref = await getImageRef(sourceImageId);
   if (!ref?.url) throw new Error("Couldn't read that image — try a different one.");
-  const finalInput: Record<string, unknown> = { ...input, image_url: ref.url };
+  const finalInput: Record<string, unknown> = {
+    ...input,
+    image_url: await adSourceUrl(sourceImageId, ref.url, requestId),
+  };
 
   // The layers are rebuilt at the source ad's own size, directly below it, so
   // the two read as a before and after. The ad's canvas has the same aspect as
