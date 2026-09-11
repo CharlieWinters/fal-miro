@@ -30,6 +30,7 @@ import { setSceneInputs } from '../../shared/storage';
 import { toneOf, toneFill, toneOutline } from '../../shared/capabilityTone';
 import { CapabilityIcon } from '../CapabilityIcon';
 import { parseRecipeCard, type RecipeCard } from '../../shared/recipeCard';
+import { applyMotionToCharacter, pickMotionAndRig } from '../applyMotion';
 
 /** "→ Image" capture utilities that open in the modal for a large view. */
 export type CaptureTool =
@@ -202,6 +203,7 @@ export function HomeScreen({
   const [query, setQuery] = useState('');
   const [drill, setDrill] = useState<Drill>(null);
   const [appsNote, setAppsNote] = useState<string | null>(null);
+  const [applyNote, setApplyNote] = useState<string | null>(null);
 
   // Selection-aware capture tools — all of them load their source cross-origin
   // through the backend's /proxy route (Fal's CDN sends no CORS headers), so
@@ -238,6 +240,19 @@ export function HomeScreen({
     ? undefined
     : (selectedEmbeds.map((e) => (e.url ? unwrapPanoramaEmbedUrl(e.url) : null)).find(Boolean) as string | undefined);
 
+  // A motion and a rigged character selected together: play one on the other.
+  const motionAndRig = useMemo(() => pickMotionAndRig(selectedEmbeds), [selectedEmbeds]);
+  const applyMotion = async () => {
+    if (!motionAndRig) return;
+    setApplyNote('Placing the character with the motion…');
+    try {
+      await applyMotionToCharacter(motionAndRig.motion, motionAndRig.rig);
+      setApplyNote(null);
+    } catch (e) {
+      setApplyNote(e instanceof Error ? e.message : 'Could not apply the motion.');
+    }
+  };
+
   const openScene = async () => {
     await setSceneInputs({
       assets: sceneAssets.map((a) => ({ url: a.url, name: a.name })),
@@ -272,7 +287,7 @@ export function HomeScreen({
   const hasSelectionZone =
     Boolean(selectedRecipe) ||
     (Boolean(selectedEmbed) &&
-      (has3dViewerSelected || hasVideoSelected || hasPanoramaSelected || hasRigSelected || hasMotionSelected || sceneAssets.length >= 1));
+      (has3dViewerSelected || hasVideoSelected || hasPanoramaSelected || hasRigSelected || hasMotionSelected || Boolean(motionAndRig) || sceneAssets.length >= 1));
 
   return (
     <div className="screen">
@@ -342,6 +357,15 @@ export function HomeScreen({
               onOpen={() => onOpenTool('motion-to-strip', selectedEmbed.id)}
             />
           )}
+          {motionAndRig && (
+            <ToolCard
+              capability="motion"
+              title="Apply motion to character"
+              sub={`Play ${motionAndRig.motion.title || 'the motion'} on ${motionAndRig.rig.title || 'the rigged character'} — no model call`}
+              onOpen={() => void applyMotion()}
+            />
+          )}
+          {applyNote && <div className="hint">{applyNote}</div>}
           {sceneAssets.length >= 1 && (
             <ToolCard
               capability="model3d"

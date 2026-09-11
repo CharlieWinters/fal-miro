@@ -46,7 +46,9 @@ key) without conflict.
   `.glb` viewer embed), Hunyuan World (image-to-panorama → 360° photosphere
   embed), Meshy (rig + animate for posable characters), Hunyuan Motion
   (text → skeletal animation, played on a mannequin embed, with a Motion →
-  Pose strip tool that samples it into key-pose images).
+  Pose strip tool that samples it into key-pose images). Select a motion and a
+  Meshy-rigged character together and "Apply motion to character" plays the
+  motion on the character — retargeted in the browser, no model call.
 - **Audio** — e.g. ThinkSound, MMAudio, Hunyuan Foley (video → generated
   soundtrack), plus FFmpeg-backed merge utilities (merge videos, merge audio
   + video).

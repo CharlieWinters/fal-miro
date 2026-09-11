@@ -363,9 +363,14 @@ export function rigEmbedUrl(glbUrl: string): string {
   return embedPageUrl('embed-rig.html', glbUrl);
 }
 
-/** URL to the static page that plays a Hunyuan Motion .fbx clip on a grid. */
-export function motionEmbedUrl(fbxUrl: string): string {
-  return embedPageUrl('embed-motion.html', fbxUrl);
+/**
+ * URL to the static page that plays a Hunyuan Motion .fbx clip on a grid —
+ * on the mannequin it ships with, or retargeted onto a rigged character
+ * (`characterUrl`: a glb with a Mixamo-style skeleton, e.g. a Meshy rig).
+ */
+export function motionEmbedUrl(fbxUrl: string, characterUrl?: string | null): string {
+  const base = embedPageUrl('embed-motion.html', fbxUrl);
+  return characterUrl ? `${base}&character=${encodeURIComponent(characterUrl)}` : base;
 }
 
 /**
@@ -417,6 +422,17 @@ export function unwrapPanoramaEmbedUrl(embedUrl: string): string | null {
     const u = new URL(embedUrl, window.location.origin);
     if (!u.pathname.endsWith('/embed-panorama.html')) return null;
     return u.searchParams.get('url');
+  } catch {
+    return null;
+  }
+}
+
+/** The character glb a motion embed plays on, or null for the mannequin. */
+export function unwrapMotionCharacterUrl(embedUrl: string): string | null {
+  try {
+    const u = new URL(embedUrl, window.location.origin);
+    if (!u.pathname.endsWith('/embed-motion.html')) return null;
+    return u.searchParams.get('character');
   } catch {
     return null;
   }

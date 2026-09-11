@@ -28,6 +28,12 @@ a generation finishes, since Miro has no native video/3D/panorama widget — a
 `videoEmbedUrl()` etc. The motion page is the one with bundled code
 (`src/embed/motion.ts`, three.js + FBXLoader), because nothing loads FBX
 natively; a boundary rule keeps `src/embed/` free of everything but three.js.
+With `&character=<glb>` the same page retargets the clip onto a rigged
+character at load time (`src/embed/retarget.ts`: per-bone world-space rotation
+deltas against each rig's bind pose, after aligning the character's rest bone
+directions to the mannequin's — SkeletonUtils' name-based copy assumes shared
+bone axes and produces a crumpled figure here). `panel/applyMotion.ts` creates
+such an embed from a motion + rig selection; nothing is generated or uploaded.
 
 Unlike the three iframes above, these load **no Miro SDK and talk to no
 backend** — every board viewer's browser loads the media straight from Fal's

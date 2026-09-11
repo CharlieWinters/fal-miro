@@ -1,26 +1,25 @@
-// Motion embed — plays a Hunyuan Motion FBX (skinned mannequin + one clip) on
-// a loop over a ground grid. A fourth, Miro-SDK-free surface like the other
+// Motion embed — plays a Hunyuan Motion FBX on a loop over a ground grid,
+// either as the mannequin it ships with or retargeted onto a rigged character
+// (`&character=<glb url>`). A fourth, Miro-SDK-free surface like the other
 // embed pages; it must never import anything from panel/, modal/ or agents/.
-//
-// The FBX references its texture by an absolute path inside fal's container,
-// so the texture never loads; a flat material gives the wooden-mannequin look
-// fal's own preview has. Bones are drawn as a skeleton overlay so the motion
-// reads even when the mesh is small on the board.
 import * as THREE from 'three';
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { fitMotionCamera, groundOffset, makeRootFollower } from './motionScene';
+import { loadMotion } from './motionLoad';
 
 const status = document.getElementById('status') as HTMLDivElement;
-const url = new URLSearchParams(window.location.search).get('url');
+const params = new URLSearchParams(window.location.search);
+const url = params.get('url');
+const character = params.get('character');
+const isHttp = (u: string | null): u is string => Boolean(u && /^https?:\/\//.test(u));
 
-if (!url || !/^https?:\/\//.test(url)) {
+if (!isHttp(url)) {
   status.textContent = 'Missing or invalid url';
 } else {
-  void start(url);
+  void start(url, isHttp(character) ? character : null);
 }
 
-async function start(src: string): Promise<void> {
+async function start(src: string, characterUrl: string | null): Promise<void> {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -42,30 +41,19 @@ async function start(src: string): Promise<void> {
   let mixer: THREE.AnimationMixer | null = null;
   let follow: () => void = () => undefined;
   try {
-    const group = await new FBXLoader().loadAsync(src, (e) => {
-      if (e.total) status.textContent = `Loading motion… ${Math.round((e.loaded / e.total) * 100)}%`;
+    const motion = await loadMotion(src, characterUrl, (loaded, total, what) => {
+      if (total) status.textContent = `Loading ${what}… ${Math.round((loaded / total) * 100)}%`;
     });
-    group.traverse((o) => {
-      if ((o as THREE.Mesh).isMesh) {
-        (o as THREE.Mesh).material = new THREE.MeshStandardMaterial({ color: 0xc8a165, roughness: 0.7 });
-      }
-    });
-    // Feet on the grid: shift by the rest-pose bounds, then let the clip's
-    // root translation carry the figure across the floor.
-    scene.add(group);
-    scene.add(new THREE.SkeletonHelper(group));
-
-    // Pose the first frame, then put the feet on the grid and frame the
-    // figure from where the skeleton actually is.
-    const clip = group.animations[0];
-    if (clip) {
-      mixer = new THREE.AnimationMixer(group);
-      mixer.clipAction(clip).play();
-      mixer.setTime(0);
-    }
-    group.position.y -= groundOffset(group);
-    fitMotionCamera(camera, controls, group);
-    follow = makeRootFollower(group, camera, controls);
+    scene.add(motion.root);
+    // The skeleton overlay is what makes the motion legible on a small
+    // mannequin; a textured character reads on its own.
+    if (!motion.onCharacter) scene.add(new THREE.SkeletonHelper(motion.figure));
+    // Frame 0 is posed by loadMotion: put the feet on the grid and frame the
+    // figure from where its bones actually are.
+    motion.root.position.y -= groundOffset(motion.figure);
+    fitMotionCamera(camera, controls, motion.figure);
+    follow = makeRootFollower(motion.figure, camera, controls);
+    mixer = motion.mixer;
     status.textContent = '';
   } catch (err) {
     status.textContent = `Could not load the motion (${err instanceof Error ? err.message : String(err)})`;

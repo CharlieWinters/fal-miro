@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { unwrapMotionEmbedUrl } from '../../lib/api';
+import { unwrapMotionCharacterUrl, unwrapMotionEmbedUrl } from '../../lib/api';
 import { createImageAtAbsolute, resolveAbsolutePosition } from '../../shared/boardHelpers';
 import { setItemGenerationSettings, getItemGenerationSettings, type GenSettings } from '../../shared/storage';
 import { fitMotionCamera, groundOffset, makeRootFollower, sampleTimes } from '../../embed/motionScene';
+import { loadMotion } from '../../embed/motionLoad';
 import { ToneIconChip } from '../CapabilityIcon';
 import { renderHiRes } from '../threeCapture';
 
@@ -45,6 +45,7 @@ export function MotionStripScreen({ itemId, onClose }: { itemId: string; onClose
   const ctxRef = useRef<Ctx | null>(null);
   const [embed, setEmbed] = useState<Embed | null>(null);
   const [fbxUrl, setFbxUrl] = useState<string | null>(null);
+  const [characterUrl, setCharacterUrl] = useState<string | null>(null);
   const [count, setCount] = useState(6);
   const [ratio, setRatio] = useState(3 / 4);
   const [playing, setPlaying] = useState(true);
@@ -65,6 +66,7 @@ export function MotionStripScreen({ itemId, onClose }: { itemId: string; onClose
         setEmbed(it);
         const url = it?.url ? unwrapMotionEmbedUrl(it.url) : null;
         if (!url) throw new Error('not a motion embed');
+        setCharacterUrl(unwrapMotionCharacterUrl(it.url ?? ''));
         setFbxUrl(url);
       } catch {
         if (mounted) setError('Could not read the selected motion.');
@@ -98,35 +100,22 @@ export function MotionStripScreen({ itemId, onClose }: { itemId: string; onClose
     const orbit = new OrbitControls(camera, renderer.domElement);
     orbit.enableDamping = true;
 
-    new FBXLoader().load(
-      fbxUrl,
-      (group) => {
+    loadMotion(fbxUrl, characterUrl, (loaded, total, what) => {
+      if (total) setStatus(`Loading the ${what}… ${Math.round((loaded / total) * 100)}%`);
+    }).then(
+      (motion) => {
         if (disposed) return;
-        group.traverse((o) => {
-          if ((o as THREE.Mesh).isMesh) {
-            (o as THREE.Mesh).material = new THREE.MeshStandardMaterial({ color: 0xc8a165, roughness: 0.7 });
-          }
-        });
-        scene.add(group);
-        scene.add(new THREE.SkeletonHelper(group));
-        const clip = group.animations[0];
-        if (!clip) {
-          setError('The file has no animation clip.');
-          return;
-        }
-        const mixer = new THREE.AnimationMixer(group);
-        const action = mixer.clipAction(clip);
-        action.play();
-        // Pose the first frame, then put the feet on the grid and frame the
-        // figure from where the skeleton actually is.
-        mixer.setTime(0);
-        group.position.y -= groundOffset(group);
-        fitMotionCamera(camera, orbit, group);
+        scene.add(motion.root);
+        if (!motion.onCharacter) scene.add(new THREE.SkeletonHelper(motion.figure));
+        // Frame 0 is posed by loadMotion: feet on the grid, camera on the bones.
+        motion.root.position.y -= groundOffset(motion.figure);
+        fitMotionCamera(camera, orbit, motion.figure);
+        const { mixer, action } = motion;
         const clock = new THREE.Clock();
         const ctx: Ctx = {
           renderer, scene, camera, orbit, mixer, action,
-          follow: makeRootFollower(group, camera, orbit),
-          duration: clip.duration, raf: 0,
+          follow: makeRootFollower(motion.figure, camera, orbit),
+          duration: motion.duration, raf: 0,
         };
         const loop = () => {
           if (!ctx.action.paused) {
@@ -142,14 +131,13 @@ export function MotionStripScreen({ itemId, onClose }: { itemId: string; onClose
         };
         ctx.raf = requestAnimationFrame(loop);
         ctxRef.current = ctx;
-        setDuration(clip.duration);
+        setDuration(motion.duration);
         setReady(true);
         setStatus(null);
       },
-      (e) => {
-        if (e.total) setStatus(`Loading the motion… ${Math.round((e.loaded / e.total) * 100)}%`);
+      (e: unknown) => {
+        if (!disposed) setError(e instanceof Error ? e.message : 'Could not load the motion file.');
       },
-      () => setError('Could not load the motion file.'),
     );
 
     const onResize = () => {
@@ -171,7 +159,7 @@ export function MotionStripScreen({ itemId, onClose }: { itemId: string; onClose
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [fbxUrl]);
+  }, [fbxUrl, characterUrl]);
 
   const seek = useCallback((t: number) => {
     const ctx = ctxRef.current;
@@ -250,7 +238,9 @@ export function MotionStripScreen({ itemId, onClose }: { itemId: string; onClose
         <ToneIconChip capability="motion" />
         <div>
           <div className="title">Motion → Pose strip</div>
-          <div className="sub">Frame the figure, then sample the clip into a row of key poses.</div>
+          <div className="sub">
+            Frame the {characterUrl ? 'character' : 'figure'}, then sample the clip into a row of key poses.
+          </div>
         </div>
       </div>
 
