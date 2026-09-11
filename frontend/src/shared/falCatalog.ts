@@ -26,6 +26,10 @@ export type Capability =
   | 'model3d'
   | 'panorama'
   | 'rig'
+  // Text → skeletal animation (Hunyuan Motion): an FBX clip on a mannequin.
+  | 'motion'
+  // Flat ad → its editable layers (Bria Ad Delayer): structured JSON, no media.
+  | 'layers'
   | 'sound'
   | 'merge'
   // Long-tail synced categories (LLM, vision, training data, workflows…) that
@@ -119,6 +123,13 @@ const ENDPOINT_OVERRIDES: EndpointOverride[] = [
   // Rig + animate a character → animated viewer embed. fal files these under
   // `3d-to-3d`, which carries no hint that a rigging screen is wanted.
   { match: /rigging/i, apply: { capability: 'rig' }, task: 'Rig + Animate' },
+  // Text → human motion as an FBX clip. fal files it under `text-to-3d`, which
+  // would send it to the generic form and then fail on the .fbx output.
+  { match: /hunyuan-motion/i, apply: { capability: 'motion', generate: true }, task: 'Text to Motion' },
+  // Flat ad → a layer tree, which the app rebuilds as board items. fal files it
+  // under `image-to-json`, which would send it to the generic form and then
+  // fail: the result carries no media URL at all.
+  { match: /ad-delayer/i, apply: { capability: 'layers' }, task: 'Ad to Layers' },
   // The two FFmpeg merges this app has screens for. `merge-audios` is a third
   // one with no screen, so it is deliberately not matched.
   {
@@ -188,6 +199,8 @@ export const DEFAULT_MEDIA_CATEGORIES = [
   'Text to Audio',
   'Text to Speech',
   'Rig & Animate',
+  'Text to Motion',
+  'Ad to Layers',
   'Video to Audio',
   'Video editing',
 ];
@@ -408,6 +421,10 @@ export function categoryOf(m: FalModel): string {
       return 'Image to Panorama';
     case 'rig':
       return 'Rig & Animate';
+    case 'motion':
+      return 'Text to Motion';
+    case 'layers':
+      return 'Ad to Layers';
     case 'sound':
       return 'Video to Audio';
     case 'audio':
@@ -454,6 +471,10 @@ export function capabilityForCategory(category: string): Capability {
       return 'panorama';
     case 'Rig & Animate':
       return 'rig';
+    case 'Text to Motion':
+      return 'motion';
+    case 'Ad to Layers':
+      return 'layers';
     case 'Video to Audio':
       return 'sound';
     case 'Text to Audio':
@@ -607,6 +628,8 @@ const FAL_CATEGORY_MAP: Record<string, CategoryMapping> = {
   'text-to-speech': { label: 'Text to Speech', capability: 'audio', generate: true, screen: 'generic' },
   'audio-to-audio': { label: 'Audio to Audio', capability: 'audio', screen: 'generic' },
   'speech-to-text': { label: 'Speech to Text', capability: 'audio', screen: 'generic' },
+  'image-to-json': { label: 'Image To Json', capability: 'data', screen: 'generic' },
+  'text-to-json': { label: 'Text To Json', capability: 'data', screen: 'generic' },
   vision: { label: 'Vision', capability: 'vision', screen: 'generic' },
   llm: { label: 'LLM', capability: 'llm', screen: 'generic' },
   training: { label: 'Training', capability: 'training', screen: 'generic' },
@@ -708,6 +731,8 @@ const CAPABILITY_LABEL: Record<Capability, string> = {
   model3d: '3D',
   panorama: 'Panorama',
   rig: 'Rig',
+  motion: 'Motion',
+  layers: 'Layers',
   sound: 'Sound',
   merge: 'Merge',
   llm: 'LLM',
@@ -746,6 +771,10 @@ export const COMMON_ARGS: Record<Capability, string[]> = {
   panorama: ['prompt', 'image_url'],
   // Rigging, sound + merge use dedicated selection-driven screens, not the form.
   rig: [],
+  // Text-to-motion has its own screen (prompt + duration), not the form.
+  motion: [],
+  // Ad-to-layers has its own screen (selected ad + text mode), not the form.
+  layers: [],
   sound: ['prompt'],
   merge: [],
   // Long-tail (all screen: 'generic') — names absent from a given model's

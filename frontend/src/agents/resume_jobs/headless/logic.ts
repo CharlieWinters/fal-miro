@@ -1,4 +1,4 @@
-import { api, videoEmbedUrl, model3dEmbedUrl, panoramaEmbedUrl, rigEmbedUrl, type StatusResponse } from '../../../lib/api';
+import { api, videoEmbedUrl, model3dEmbedUrl, panoramaEmbedUrl, rigEmbedUrl, motionEmbedUrl, type StatusResponse } from '../../../lib/api';
 import { POLL_BUDGET, isTerminal, pollStatus, shouldLeaveForResume } from '../../../shared/pollStatus';
 import {
   createEmbedAtPosition,
@@ -18,6 +18,7 @@ import { extractAnimations, extractRestPose } from '../../../shared/meshyAnimati
 import { estimateCostUSD, reportedInferenceSeconds } from '../../../shared/cost';
 import { placeGenericOutput } from '../../../shared/genericOutput';
 import { advancePipelineForJob } from '../../../shared/pipelineRunner';
+import { buildAdLayersFromResult, isAdLayersResult, targetWidthFromRatio } from '../../../shared/adLayers';
 
 /**
  * Walk the persisted active-jobs list and check each one's current status with
@@ -83,6 +84,35 @@ async function finalize(job: ActiveJob, s: StatusResponse): Promise<void> {
   }
 
   const pos = job.targetPosition;
+
+  // Ad-to-layers is the one job whose result is the payload rather than a
+  // media URL, so it is settled before the `outputUrl` checks below — those
+  // would read it as a failure. Same builder as the live agent.
+  if (job.kind === 'layers') {
+    if (s.status === 'SUCCEEDED' && isAdLayersResult(s.data)) {
+      await buildAdLayersFromResult({
+        data: s.data,
+        settings: job.settings,
+        endpointId: job.endpointId,
+        placeholderId: job.placeholderId,
+        // The live agent stored the source ad's board size as the job's ratio.
+        targetWidth: targetWidthFromRatio(job.settings.ratio),
+        sourceImageId: job.settings.parents?.[0],
+        x: pos?.x ?? 0,
+        y: pos?.y ?? 0,
+      });
+    } else {
+      await replaceImageContent(
+        job.placeholderId,
+        makePlaceholderDataUrl(job.settings.ratio, 'Failed'),
+        `Fal · ${s.status}`,
+        pos,
+      );
+    }
+    await removeActiveJob(job.requestId);
+    return;
+  }
+
   const outputUrl = s.output?.[0];
   if (s.status === 'SUCCEEDED' && outputUrl) {
     if (job.kind === 'generic') {
@@ -133,7 +163,7 @@ async function finalize(job: ActiveJob, s: StatusResponse): Promise<void> {
           animations: [clip],
         });
       }
-    } else if (job.kind === 'video' || job.kind === 'model3d' || job.kind === 'panorama') {
+    } else if (job.kind === 'video' || job.kind === 'model3d' || job.kind === 'panorama' || job.kind === 'motion') {
       // Swap the placeholder image for an inline embed (video player, 3D
       // viewer, or 360 photosphere — same as the live agents).
       const { width, height } = parseRatio(job.settings.ratio, 720);
@@ -142,7 +172,13 @@ async function finalize(job: ActiveJob, s: StatusResponse): Promise<void> {
       const y = abs?.absoluteY ?? pos?.y ?? 0;
       await deleteItem(job.placeholderId);
       const embedUrl =
-        job.kind === 'model3d' ? model3dEmbedUrl(outputUrl) : job.kind === 'panorama' ? panoramaEmbedUrl(outputUrl) : videoEmbedUrl(outputUrl);
+        job.kind === 'model3d'
+          ? model3dEmbedUrl(outputUrl)
+          : job.kind === 'panorama'
+            ? panoramaEmbedUrl(outputUrl)
+            : job.kind === 'motion'
+              ? motionEmbedUrl(outputUrl)
+              : videoEmbedUrl(outputUrl);
       const embed = await createEmbedAtPosition({ url: embedUrl, x, y, width, height });
       const settings = { ...job.settings };
       // Backfill cost if the live agent never got to stamp it (e.g. the job
@@ -185,6 +221,8 @@ function budgetFor(kind: ActiveJob['kind']) {
       return POLL_BUDGET.rig;
     case 'panorama':
       return POLL_BUDGET.panorama;
+    case 'motion':
+      return POLL_BUDGET.motion;
     default:
       return POLL_BUDGET.generic;
   }

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fal for Miro — Motion</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #14142b; overflow: hidden; }
+    canvas { display: block; width: 100%; height: 100%; }
+    #status {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: #cfd0e4; font: 13px system-ui, sans-serif; pointer-events: none; text-align: center; padding: 16px;
+    }
+    #status:empty { display: none; }
+  </style>
+</head>
+<body>
+  <!--
+    Static page (see embed-video.html). Hunyuan Motion returns an FBX: a
+    skinned mannequin on an SMPL-X skeleton with one animation clip. Nothing in
+    the browser plays FBX natively and <model-viewer> is glTF-only, so this
+    page bundles three.js and its FBXLoader (src/embed/motion.ts) and plays the
+    clip on a loop over a ground grid, orbitable. Fal's CDN sends CORS headers,
+    so the file loads directly — no backend involved.
+
+    See src/lib/api.ts's motionEmbedUrl() for how this URL gets built.
+  -->
+  <div id="status">Loading motion…</div>
+  <script type="module" src="/src/embed/motion.ts"></script>
+</body>
+</html>

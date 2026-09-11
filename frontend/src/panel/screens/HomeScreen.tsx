@@ -21,6 +21,7 @@ import { useFirstSelected, useSelectedItems } from '../hooks/useSelection';
 import {
   connectionMode,
   unwrapModel3dEmbedUrl,
+  unwrapMotionEmbedUrl,
   unwrapVideoEmbedUrl,
   unwrapPanoramaEmbedUrl,
   unwrapRigEmbedUrl,
@@ -29,6 +30,7 @@ import { setSceneInputs } from '../../shared/storage';
 import { toneOf, toneFill, toneOutline } from '../../shared/capabilityTone';
 import { CapabilityIcon } from '../CapabilityIcon';
 import { parseRecipeCard, type RecipeCard } from '../../shared/recipeCard';
+import { applyMotionToCharacter, pickMotionAndRig } from '../applyMotion';
 
 /** "→ Image" capture utilities that open in the modal for a large view. */
 export type CaptureTool =
@@ -36,7 +38,8 @@ export type CaptureTool =
   | 'video-to-image'
   | 'panorama-to-image'
   | 'rig-to-image'
-  | 'pose-character';
+  | 'pose-character'
+  | 'motion-to-strip';
 
 const CAPABILITY_VERB: Record<Capability, string> = {
   image: 'Generate Image',
@@ -47,6 +50,8 @@ const CAPABILITY_VERB: Record<Capability, string> = {
   model3d: 'Generate 3D',
   panorama: 'Generate Panorama',
   rig: 'Rig + Animate',
+  motion: 'Generate Motion',
+  layers: 'Split into Layers',
   sound: 'Add Sound',
   merge: 'Merge',
   llm: 'Run LLM',
@@ -199,6 +204,7 @@ export function HomeScreen({
   const [query, setQuery] = useState('');
   const [drill, setDrill] = useState<Drill>(null);
   const [appsNote, setAppsNote] = useState<string | null>(null);
+  const [applyNote, setApplyNote] = useState<string | null>(null);
 
   // Selection-aware capture tools — all of them load their source cross-origin
   // through the backend's /proxy route (Fal's CDN sends no CORS headers), so
@@ -209,6 +215,9 @@ export function HomeScreen({
   const hasVideoSelected = captureAvailable && Boolean(selectedEmbed?.url && unwrapVideoEmbedUrl(selectedEmbed.url));
   const hasPanoramaSelected = captureAvailable && Boolean(selectedEmbed?.url && unwrapPanoramaEmbedUrl(selectedEmbed.url));
   const hasRigSelected = captureAvailable && Boolean(selectedEmbed?.url && unwrapRigEmbedUrl(selectedEmbed.url));
+  // The motion strip loads its FBX straight from fal's CDN (which sends CORS
+  // headers), so it works in client mode too — no /proxy involved.
+  const hasMotionSelected = Boolean(selectedEmbed?.url && unwrapMotionEmbedUrl(selectedEmbed.url));
 
   // Selection-aware settings-card reopen — a Card whose description parses as
   // a recipe (see recipeCard.ts) offers to jump back into its model screen.
@@ -231,6 +240,19 @@ export function HomeScreen({
   const scenePanorama = !captureAvailable
     ? undefined
     : (selectedEmbeds.map((e) => (e.url ? unwrapPanoramaEmbedUrl(e.url) : null)).find(Boolean) as string | undefined);
+
+  // A motion and a rigged character selected together: play one on the other.
+  const motionAndRig = useMemo(() => pickMotionAndRig(selectedEmbeds), [selectedEmbeds]);
+  const applyMotion = async () => {
+    if (!motionAndRig) return;
+    setApplyNote('Placing the character with the motion…');
+    try {
+      await applyMotionToCharacter(motionAndRig.motion, motionAndRig.rig);
+      setApplyNote(null);
+    } catch (e) {
+      setApplyNote(e instanceof Error ? e.message : 'Could not apply the motion.');
+    }
+  };
 
   const openScene = async () => {
     await setSceneInputs({
@@ -266,7 +288,7 @@ export function HomeScreen({
   const hasSelectionZone =
     Boolean(selectedRecipe) ||
     (Boolean(selectedEmbed) &&
-      (has3dViewerSelected || hasVideoSelected || hasPanoramaSelected || hasRigSelected || sceneAssets.length >= 1));
+      (has3dViewerSelected || hasVideoSelected || hasPanoramaSelected || hasRigSelected || hasMotionSelected || Boolean(motionAndRig) || sceneAssets.length >= 1));
 
   return (
     <div className="screen">
@@ -328,6 +350,23 @@ export function HomeScreen({
               onOpen={() => onOpenTool('pose-character', selectedEmbed.id)}
             />
           )}
+          {selectedEmbed && hasMotionSelected && (
+            <ToolCard
+              capability="motion"
+              title="Motion → Pose strip"
+              sub="Sample the clip into a row of key poses on the board"
+              onOpen={() => onOpenTool('motion-to-strip', selectedEmbed.id)}
+            />
+          )}
+          {motionAndRig && (
+            <ToolCard
+              capability="motion"
+              title="Apply motion to character"
+              sub={`Play ${motionAndRig.motion.title || 'the motion'} on ${motionAndRig.rig.title || 'the rigged character'} — no model call`}
+              onOpen={() => void applyMotion()}
+            />
+          )}
+          {applyNote && <div className="hint">{applyNote}</div>}
           {sceneAssets.length >= 1 && (
             <ToolCard
               capability="model3d"

@@ -14,6 +14,8 @@ import { agentMeta as falVideoGen } from '../agents/fal_video_gen';
 import { agentMeta as falImageTo3d } from '../agents/fal_image_to_3d';
 import { agentMeta as falImageToPanorama } from '../agents/fal_image_to_panorama';
 import { agentMeta as falRig } from '../agents/fal_rig';
+import { agentMeta as falMotion } from '../agents/fal_motion';
+import { agentMeta as falAdLayers } from '../agents/fal_ad_layers';
 import { agentMeta as falFfmpegMerge } from '../agents/fal_ffmpeg_merge';
 import { agentMeta as falGeneric } from '../agents/fal_generic';
 import { agentMeta as resumeJobs } from '../agents/resume_jobs';
@@ -25,6 +27,8 @@ export const agentList: AgentMeta[] = [
   falImageTo3d,
   falImageToPanorama,
   falRig,
+  falMotion,
+  falAdLayers,
   falFfmpegMerge,
   falGeneric,
   resumeJobs,

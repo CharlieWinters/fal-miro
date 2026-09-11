@@ -283,3 +283,37 @@ describe('mergeSyncedCatalog — labels and status', () => {
     expect(extra.family).toBe(primary.family);
   });
 });
+
+describe('mergeSyncedCatalog — text-to-motion', () => {
+  it('routes Hunyuan Motion to the motion screen, not the generic text-to-3d form', () => {
+    for (const id of ['fal-ai/hunyuan-motion', 'fal-ai/hunyuan-motion/fast']) {
+      const m = route(id, 'text-to-3d');
+      expect(m.capability, id).toBe('motion');
+      expect(m.screen, id).toBeUndefined();
+      expect(m.generate, id).toBe(true);
+      expect(categoryOf(m), id).toBe('Text to Motion');
+    }
+  });
+
+  it('leaves other text-to-3d models on the generic form', () => {
+    const m = route('fal-ai/hunyuan3d-v3/text-to-3d', 'text-to-3d');
+    expect(m.capability).toBe('model3d');
+    expect(m.screen).toBe('generic');
+  });
+});
+
+describe('mergeSyncedCatalog — ad to layers', () => {
+  it('routes Bria Ad Delayer to the layers screen, not the generic image-to-json form', () => {
+    const m = route('bria/ad-delayer', 'image-to-json');
+    expect(m.capability).toBe('layers');
+    expect(m.screen).toBeUndefined();
+    expect(categoryOf(m)).toBe('Ad to Layers');
+  });
+
+  it('leaves other image-to-json models on the generic form, as data rather than images', () => {
+    const m = route('bria/fibo/generate/structured_prompt', 'image-to-json');
+    expect(m.capability).toBe('data');
+    expect(m.screen).toBe('generic');
+    expect(m.category).toBe('Image To Json');
+  });
+});

@@ -14,7 +14,7 @@ import { isOurs } from '../shared/frameMessaging';
 export type LocalJob = {
   requestId: string;
   label: string;
-  kind: 'image' | 'video' | 'audio' | 'model3d' | 'panorama' | 'rig' | 'generic';
+  kind: 'image' | 'video' | 'audio' | 'model3d' | 'panorama' | 'rig' | 'motion' | 'layers' | 'generic';
   status: 'queued' | 'running' | 'succeeded' | 'failed';
   message?: string;
   progress?: number;

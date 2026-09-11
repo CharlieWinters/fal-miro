@@ -5,6 +5,7 @@ import { PanoramaToImageScreen } from '../panel/screens/PanoramaToImageScreen';
 import { RigPoseScreen } from '../panel/screens/RigPoseScreen';
 import { BonePoseScreen } from '../panel/screens/BonePoseScreen';
 import { SceneBuilderScreen } from '../panel/screens/SceneBuilderScreen';
+import { MotionStripScreen } from '../panel/screens/MotionStripScreen';
 import { loadBackendConfig } from '../shared/backendConfig';
 import '../styles/index.css';
 
@@ -35,6 +36,9 @@ function ModalApp() {
   }
   if (itemId && tool === 'pose-character') {
     return <BonePoseScreen itemId={itemId} onClose={close} />;
+  }
+  if (itemId && tool === 'motion-to-strip') {
+    return <MotionStripScreen itemId={itemId} onClose={close} />;
   }
   if (tool === 'scene-builder') {
     return <SceneBuilderScreen onClose={close} />;

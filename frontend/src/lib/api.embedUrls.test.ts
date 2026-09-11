@@ -15,11 +15,14 @@ import {
   audioEmbedUrl,
   panoramaEmbedUrl,
   rigEmbedUrl,
+  motionEmbedUrl,
   unwrapVideoEmbedUrl,
   unwrapModel3dEmbedUrl,
   unwrapAudioEmbedUrl,
   unwrapPanoramaEmbedUrl,
   unwrapRigEmbedUrl,
+  unwrapMotionEmbedUrl,
+  unwrapMotionCharacterUrl,
 } from './api';
 
 const PAIRS = [
@@ -28,6 +31,7 @@ const PAIRS = [
   ['audio', audioEmbedUrl, unwrapAudioEmbedUrl, 'https://v3b.fal.media/files/b/x/track.mp3'],
   ['panorama', panoramaEmbedUrl, unwrapPanoramaEmbedUrl, 'https://v3b.fal.media/files/b/x/pano.jpg'],
   ['rig', rigEmbedUrl, unwrapRigEmbedUrl, 'https://v3b.fal.media/files/b/x/running.glb'],
+  ['motion', motionEmbedUrl, unwrapMotionEmbedUrl, 'https://v3b.fal.media/files/b/x/hy_motion_000.fbx'],
 ] as const;
 
 describe.each(PAIRS)('%s embed URL', (_kind, build, unwrap, asset) => {
@@ -124,5 +128,22 @@ describe('subpath hosting (import.meta.env.BASE_URL)', () => {
     const mod = await import('./api');
     const asset = 'https://v3b.fal.media/files/b/x/clip.mp4';
     expect(mod.unwrapVideoEmbedUrl(mod.videoEmbedUrl(asset))).toBe(asset);
+  });
+});
+
+describe('motion embed with a character', () => {
+  const fbx = 'https://v3b.fal.media/files/b/x/hy_motion_000.fbx';
+  const glb = 'https://v3b.fal.media/files/b/y/rigged_character.glb?x=1&y=2';
+
+  it('carries both URLs and unwraps each', () => {
+    const url = motionEmbedUrl(fbx, glb);
+    expect(unwrapMotionEmbedUrl(url)).toBe(fbx);
+    expect(unwrapMotionCharacterUrl(url)).toBe(glb);
+  });
+
+  it('has no character for the plain mannequin embed', () => {
+    expect(unwrapMotionCharacterUrl(motionEmbedUrl(fbx))).toBeNull();
+    expect(unwrapMotionCharacterUrl(motionEmbedUrl(fbx, null))).toBeNull();
+    expect(unwrapMotionCharacterUrl('https://x/embed-rig.html?url=a')).toBeNull();
   });
 });

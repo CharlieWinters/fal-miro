@@ -44,7 +44,16 @@ key) without conflict.
   the board.
 - **3D & panorama** — e.g. Hunyuan3D, TripoSR (image-to-3D → orbit-able
   `.glb` viewer embed), Hunyuan World (image-to-panorama → 360° photosphere
-  embed), Meshy (rig + animate for posable characters).
+  embed), Meshy (rig + animate for posable characters), Hunyuan Motion
+  (text → skeletal animation, played on a mannequin embed, with a Motion →
+  Pose strip tool that samples it into key-pose images). Select a motion and a
+  Meshy-rigged character together and "Apply motion to character" plays the
+  motion on the character — retargeted in the browser, no model call.
+- **Ads → editable layers** — Bria Ad Delayer takes a flat ad image apart and
+  the app rebuilds it directly below the original, same size, as ordinary board
+  items: cutouts as images, copy as real Miro text with its colours and sizes,
+  flat fills as shapes, stacked in the model's own order. No frame, so every
+  layer is draggable and retypeable straight away.
 - **Audio** — e.g. ThinkSound, MMAudio, Hunyuan Foley (video → generated
   soundtrack), plus FFmpeg-backed merge utilities (merge videos, merge audio
   + video).

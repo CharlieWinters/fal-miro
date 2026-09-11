@@ -39,6 +39,19 @@ const ICONS: Partial<Record<Capability, El[]>> = {
     ['path', { d: 'M8 20l4-7 4 7' }],
     ['path', { d: 'M9 10.5h6' }],
   ],
+  // Running figure — text-to-motion clips.
+  motion: [
+    ['circle', { cx: 14.5, cy: 4, r: 1.6 }],
+    ['path', { d: 'M13 7.5l-3.5 2.5 2 3.5' }],
+    ['path', { d: 'M13 7.5l3 2.5 3 1' }],
+    ['path', { d: 'M11.5 13.5L8 16l-2.5 4.5' }],
+    ['path', { d: 'M11.5 13.5l3 3 .5 4' }],
+  ],
+  // Stacked sheets — a flat ad taken apart into layers.
+  layers: [
+    ['rect', { x: 3, y: 3, width: 12, height: 12, rx: 2 }],
+    ['path', { d: 'M17 7h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-2' }],
+  ],
   merge: [
     ['path', { d: 'M12 3l9 5-9 5-9-5z' }],
     ['path', { d: 'M3 13l9 5 9-5' }],

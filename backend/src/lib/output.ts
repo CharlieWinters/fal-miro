@@ -66,6 +66,10 @@ export function extractOutputUrls(data: unknown): string[] {
   // Meshy rigging: prefer an animated glb so the board embed moves.
   const rig = firstRiggedGlb(d);
   if (rig) urls.push(rig);
+  // Hunyuan Motion: an FBX animation (mesh + skeleton + clip). `motion_json`
+  // is the same motion as raw arrays and is not something the board can show,
+  // so it is deliberately not treated as an output URL.
+  pushUrl(urls, d.fbx_file);
 
   return urls;
 }

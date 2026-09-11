@@ -61,6 +61,16 @@ module.exports = {
       to: { path: '^src/(apps|agents|panel|modal|headless)/' },
     },
     {
+      name: 'embed-pages-stay-sdk-free',
+      severity: 'error',
+      comment:
+        'src/embed/ backs the static embed pages, which run on the board for every ' +
+        'viewer with no Miro SDK and no backend. They may use three.js and each ' +
+        'other, nothing else in the app.',
+      from: { path: '^src/embed/' },
+      to: { path: '^src/', pathNot: '^src/embed/' },
+    },
+    {
       name: 'no-circular',
       severity: 'error',
       comment: 'Circular imports make load order load-bearing.',
