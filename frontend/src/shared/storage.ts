@@ -47,6 +47,12 @@ export type ActiveJob = {
    *  its normal single-model finalize. */
   pipelineRunId?: string;
   stepIndex?: number;
+  /** Status checks that could not be answered, counted across board loads so a
+   *  job that will never resolve is abandoned instead of resumed forever
+   *  (see shared/jobRetry.ts). */
+  failures?: number;
+  /** Why the last check failed — shown in the tray, kept short for appData. */
+  lastError?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -164,6 +170,48 @@ export async function addActiveJob(job: ActiveJob): Promise<void> {
 export async function removeActiveJob(requestId: string): Promise<void> {
   const jobs = (await getActiveJobs()).filter((j) => j.requestId !== requestId);
   await saveActiveJobs(jobs);
+}
+
+/** Error text kept per job: enough to recognise the failure, small enough for
+ *  appData's ~30 KB budget across 30 jobs. */
+const MAX_LAST_ERROR = 200;
+
+/**
+ * Count a status check that could not be answered, and return the new total
+ * (0 if the job has already left the ledger). Callers pass the total to
+ * `giveUpReason` in shared/jobRetry.ts to decide whether to abandon the job.
+ *
+ * The count is persisted rather than held in memory because the retries it
+ * guards against happen one per board load, in a fresh frame each time.
+ */
+export async function recordJobFailure(requestId: string, error?: string): Promise<number> {
+  const jobs = await getActiveJobs();
+  let failures = 0;
+  const next = jobs.map((j) => {
+    if (j.requestId !== requestId) return j;
+    failures = (j.failures ?? 0) + 1;
+    return {
+      ...j,
+      failures,
+      lastError: error ? error.slice(0, MAX_LAST_ERROR) : j.lastError,
+    };
+  });
+  if (failures === 0) return 0;
+  await saveActiveJobs(next);
+  return failures;
+}
+
+/**
+ * Forget earlier failed checks after one succeeds, so the count means
+ * *consecutive* failures. Writes nothing when there is no count to clear —
+ * board appData is metered, and the common case is a job that has never failed.
+ */
+export async function resetJobFailures(requestId: string): Promise<void> {
+  const jobs = await getActiveJobs();
+  if (!jobs.some((j) => j.requestId === requestId && (j.failures ?? 0) > 0)) return;
+  await saveActiveJobs(
+    jobs.map((j) => (j.requestId === requestId ? { ...j, failures: 0, lastError: undefined } : j)),
+  );
 }
 
 export async function getPipelineRuns(): Promise<PipelineRun[]> {

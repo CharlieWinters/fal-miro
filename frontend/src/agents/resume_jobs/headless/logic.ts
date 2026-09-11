@@ -1,5 +1,6 @@
 import { api, videoEmbedUrl, model3dEmbedUrl, panoramaEmbedUrl, rigEmbedUrl, motionEmbedUrl, type StatusResponse } from '../../../lib/api';
-import { POLL_BUDGET, isTerminal, pollStatus, shouldLeaveForResume } from '../../../shared/pollStatus';
+import { POLL_BUDGET, isTerminal, isUnreachable, pollStatus, shouldLeaveForResume } from '../../../shared/pollStatus';
+import { describeGiveUp, giveUpReason } from '../../../shared/jobRetry';
 import {
   createEmbedAtPosition,
   deleteItem,
@@ -10,7 +11,9 @@ import {
 } from '../../../shared/boardHelpers';
 import {
   getActiveJobs,
+  recordJobFailure,
   removeActiveJob,
+  resetJobFailures,
   setItemGenerationSettings,
   type ActiveJob,
 } from '../../../shared/storage';
@@ -36,22 +39,65 @@ export async function run(_payload: unknown): Promise<{ resumed: number; finaliz
 
   let finalized = 0;
   for (const job of jobs) {
+    // Cheapest check first: a job already past its failure budget or its age
+    // limit is dropped without spending a status call on it.
+    const done = giveUpReason(job);
+    if (done) {
+      await abandon(job, describeGiveUp(done));
+      continue;
+    }
     try {
       const s = await api.getStatus(job.endpointId, job.requestId);
       if (isTerminal(s.status)) {
         await finalize(job, s);
         finalized += 1;
       } else {
+        await resetJobFailures(job.requestId);
         void pollUntilDone(job).catch((e) =>
           console.warn(`[resume_jobs] poll failed for ${job.requestId}:`, e),
         );
       }
     } catch (e) {
       console.warn(`[resume_jobs] could not check request ${job.requestId}:`, e);
+      await noteFailedCheck(job, e);
     }
   }
 
   return { resumed: jobs.length, finalized };
+}
+
+/**
+ * Count a status check we could not get an answer to, and abandon the job once
+ * it has used up its budget. Without this the entry stays in the ledger and is
+ * retried on every board load, for the life of the board.
+ */
+async function noteFailedCheck(job: ActiveJob, err: unknown): Promise<void> {
+  const message = err instanceof Error ? err.message : String(err);
+  const failures = await recordJobFailure(job.requestId, message);
+  if (failures === 0) return; // already gone from the ledger
+  const reason = giveUpReason({ createdAt: job.createdAt, failures });
+  if (reason) await abandon(job, describeGiveUp(reason));
+}
+
+/**
+ * Stop tracking a job: resolve its placeholder so the board does not keep a
+ * frozen "generating" tile, then drop the ledger entry. Placeholder failures
+ * are swallowed — the entry must go either way, or we are back to retrying
+ * forever.
+ */
+async function abandon(job: ActiveJob, why: string): Promise<void> {
+  console.warn(`[resume_jobs] abandoning ${job.requestId}: ${why}`);
+  try {
+    await replaceImageContent(
+      job.placeholderId,
+      makePlaceholderDataUrl(job.settings.ratio, 'Failed'),
+      `Fal · ${why}`,
+      job.targetPosition,
+    );
+  } catch (e) {
+    console.warn(`[resume_jobs] could not update the placeholder for ${job.requestId}:`, e);
+  }
+  await removeActiveJob(job.requestId);
 }
 
 /** Does the job's placeholder still exist on the board? */
@@ -223,6 +269,8 @@ function budgetFor(kind: ActiveJob['kind']) {
       return POLL_BUDGET.panorama;
     case 'motion':
       return POLL_BUDGET.motion;
+    case 'layers':
+      return POLL_BUDGET.layers;
     default:
       return POLL_BUDGET.generic;
   }
@@ -235,8 +283,11 @@ async function pollUntilDone(job: ActiveJob): Promise<void> {
   } catch (err) {
     if (shouldLeaveForResume(err)) {
       // Still running (or the backend is unreachable) — keep the ledger entry
-      // so the next board load tries again.
+      // so the next board load tries again. An unreachable status taught us
+      // nothing about the job, so it counts against the failure budget; a
+      // timeout means Fal said the job is alive, so it does not.
       console.warn(`[resume_jobs] request ${job.requestId} left for the next load:`, err);
+      if (isUnreachable(err)) await noteFailedCheck(job, err);
       return;
     }
     throw err;

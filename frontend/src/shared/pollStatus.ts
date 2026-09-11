@@ -64,6 +64,17 @@ export function shouldLeaveForResume(err: unknown): boolean {
   return err instanceof Error && (err.name === 'PollTimeout' || err.name === 'PollUnreachable');
 }
 
+/**
+ * The status endpoint could not be answered at all, as opposed to the job
+ * simply outlasting its budget. Both are left for resume, but only this one
+ * counts against a job's failure budget (see shared/jobRetry.ts): a timeout
+ * means Fal told us the job is alive, an unreachable status means we learned
+ * nothing.
+ */
+export function isUnreachable(err: unknown): boolean {
+  return err instanceof Error && err.name === 'PollUnreachable';
+}
+
 export async function pollStatus(
   endpointId: string,
   requestId: string,
