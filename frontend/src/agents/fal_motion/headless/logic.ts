@@ -9,6 +9,7 @@ import {
   replaceImageContent,
   resolveAbsolutePosition,
 } from '../../../shared/boardHelpers';
+import { describeFalError } from '../../../shared/falError';
 import {
   addActiveJob,
   removeActiveJob,
@@ -81,7 +82,7 @@ export async function run(payload: unknown, requestId = ''): Promise<MotionResul
   } catch (err) {
     await replaceImageContent(
       placeholderId,
-      makePlaceholderDataUrl(MOTION_RATIO, 'Failed to start'),
+      makePlaceholderDataUrl(MOTION_RATIO, 'Failed to start', describeFalError(err)),
       'Fal · Failed',
       { x: targetX, y: targetY },
     );
@@ -129,7 +130,7 @@ export async function run(payload: unknown, requestId = ''): Promise<MotionResul
     }
     await replaceImageContent(
       placeholderId,
-      makePlaceholderDataUrl(MOTION_RATIO, 'Failed'),
+      makePlaceholderDataUrl(MOTION_RATIO, 'Failed', describeFalError(err)),
       'Fal · Failed',
       { x: targetX, y: targetY },
     );
