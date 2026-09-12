@@ -54,15 +54,25 @@ export function BasketPanel({
   onInsertToken,
   /** Show @Image1-style tokens. Off for models that don't address by name. */
   showTokens = true,
+  /**
+   * How this model writes the token for row `index` (0-based). Defaults to
+   * `@Image1`, which is Seedance's and Kling's form — but MiniMax wants
+   * `Image 1`, Happy Horse `character1` and Grok `<IMAGE_0>`, and a chip that
+   * shows the wrong one is worse than no chip: it is the text people click to
+   * build the prompt.
+   */
+  tokenFor,
   cap,
 }: {
   basket: Basket;
   title: string;
   onInsertToken?: (token: string) => void;
   showTokens?: boolean;
+  tokenFor?: (index: number) => string;
   cap?: number;
 }) {
   const { kind, items, selectionCount, hasMissing, undo, loading } = basket;
+  const token = tokenFor ?? ((i: number) => `@${TOKEN[kind] ?? 'Item'}${i + 1}`);
   const [collapsed, setCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [drag, setDrag] = useState<number | null>(null);
@@ -110,15 +120,15 @@ export function BasketPanel({
             <Row
               key={it.uid}
               item={it}
-              index={i}
               kind={kind}
+              token={token(i)}
               showToken={showTokens}
               dragging={drag === i}
               onDragStart={() => setDrag(i)}
               onDragEnter={() => onDragEnter(i)}
               onDragEnd={() => setDrag(null)}
               onRemove={() => basket.remove(it.uid)}
-              onToken={onInsertToken ? () => onInsertToken(`@${TOKEN[kind]}${i + 1}`) : undefined}
+              onToken={onInsertToken ? () => onInsertToken(token(i)) : undefined}
             />
           ))}
         </div>
@@ -188,7 +198,6 @@ export function BasketPanel({
 
 function Row({
   item,
-  index,
   kind,
   showToken,
   dragging,
@@ -197,10 +206,11 @@ function Row({
   onDragEnd,
   onRemove,
   onToken,
+  token,
 }: {
   item: BasketItem;
-  index: number;
   kind: string;
+  token: string;
   showToken: boolean;
   dragging: boolean;
   onDragStart: () => void;
@@ -209,7 +219,6 @@ function Row({
   onRemove: () => void;
   onToken?: () => void;
 }) {
-  const token = `@${TOKEN[kind] ?? 'Item'}${index + 1}`;
   return (
     <div
       className={`bk-row ${item.missing ? 'missing' : ''} ${dragging ? 'dragging' : ''}`}
