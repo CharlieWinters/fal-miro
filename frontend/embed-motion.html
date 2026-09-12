@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Fal for Miro — Motion</title>
   <style>
     html, body { margin: 0; height: 100%; background: #14142b; overflow: hidden; }
@@ -27,5 +28,20 @@
   -->
   <div id="status">Loading motion…</div>
   <script type="module" src="/src/embed/motion.ts"></script>
+  <script>
+    // Swallow the browser's page-zoom gesture. Same guard as every other embed
+    // page: a trackpad pinch arrives as wheel + ctrlKey (Safari also fires
+    // gesture* events), this page is a CROSS-ORIGIN iframe so Miro never sees
+    // those events, nothing calls preventDefault, and the browser zooms the
+    // whole top-level miro.com page instead of the board.
+    //
+    // Only the zoom gesture is swallowed. Plain wheel is left alone so
+    // three.js keeps its camera zoom on the mannequin — the board cannot
+    // receive plain wheel over an iframe either way.
+    addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+    for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+      addEventListener(type, (e) => e.preventDefault());
+    }
+  </script>
 </body>
 </html>
