@@ -15,7 +15,14 @@
 // lighthouse, so the model received two contradictory instructions.
 
 import { describe, it, expect } from 'vitest';
-import { bindReferences, bindSeedanceReferences } from './referenceBinding';
+import {
+  bindReferences,
+  bindSeedanceReferences,
+  bindVideoReferences,
+  videoReferenceCaps,
+  videoReferenceDialect,
+  videoReferenceToken,
+} from './referenceBinding';
 
 const HERO = { url: 'https://x/hero.png', title: 'hero-shot' };
 const TEX = { url: 'https://x/tex.png', title: 'texture' };
@@ -245,5 +252,164 @@ describe('bindReferences — Kling rewrites every repeated mention', () => {
     expect(out.prompt).toBe('Take @Image1, add @Image2, keep @Image1 sharp, more @Image2.');
     expect(out.prompt).not.toMatch(/hero-shot|texture/i);
     expect(out.urls).toEqual([HERO.url, TEX.url]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reference-to-video dialects.
+//
+// The live failure these defend: selecting two references and generating on
+// minimax/h3-max/reference-to-video came back "Value error, At least one
+// reference image, video, or audio must be provided". The panel had sent them
+// as `image_urls` with `@Image1` in the prompt — Seedance's dialect — and H3
+// Max reads `reference_image_urls` and cites "Image 1". Nothing was wrong with
+// the references; they were filed under a name that model has never had.
+//
+// The endpoint ids below are real, and every dialect assignment was confirmed
+// by generating a clip against that endpoint on 2026-09-12.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ACTOR = { url: 'https://x/actor.jpg', title: 'ACTOR_REF' };
+const SCENE = { url: 'https://x/scene.jpg', title: 'SCENE_REF' };
+const MOVE = { url: 'https://x/move.mp4', title: 'MOVE_REF' };
+
+describe('videoReferenceDialect', () => {
+  const cases: Array<[string, string]> = [
+    ['bytedance/seedance-2.5/reference-to-video', 'seedance'],
+    ['bytedance/seedance-2.0/reference-to-video', 'seedance'],
+    ['fal-ai/kling-video/o3/pro/reference-to-video', 'seedance'],
+    ['minimax/h3-max/reference-to-video', 'positional'],
+    ['minimax/h3/reference-to-video', 'positional'],
+    ['alibaba/wan-3.0/reference-to-video', 'positional'],
+    ['alibaba/happy-horse/v1.1/reference-to-video', 'character'],
+    ['xai/grok-imagine-video/v1.5/reference-to-video', 'bracket'],
+    ['fal-ai/veo3.1/reference-to-video', 'none'],
+    ['google/gemini-omni-flash/v1.1/reference-to-video', 'none'],
+  ];
+  for (const [endpointId, expected] of cases) {
+    it(`classifies ${endpointId} as ${expected}`, () => {
+      expect(videoReferenceDialect(endpointId)).toBe(expected);
+    });
+  }
+
+  it('falls back to the neutral legend for an endpoint nobody has classified', () => {
+    // The catalog syncs live, so unknown endpoints are the normal case, not an
+    // error. They must still bind — just without a token scheme.
+    expect(videoReferenceDialect('some-vendor/brand-new-model/reference-to-video')).toBe('legend');
+  });
+});
+
+describe('bindVideoReferences — per-dialect prompt rewrites', () => {
+  const base = { prompt: 'ACTOR_REF waves in SCENE_REF', images: [ACTOR, SCENE] };
+
+  it('keeps Seedance on @ImageN', () => {
+    const out = bindVideoReferences({ ...base, endpointId: 'bytedance/seedance-2.0/reference-to-video' });
+    expect(out.prompt).toBe('@Image1 waves in @Image2');
+  });
+
+  it('uses spaced "Image N" for MiniMax and Wan', () => {
+    const out = bindVideoReferences({ ...base, endpointId: 'minimax/h3-max/reference-to-video' });
+    expect(out.prompt).toBe('Image 1 waves in Image 2');
+  });
+
+  it('uses characterN for Happy Horse', () => {
+    const out = bindVideoReferences({ ...base, endpointId: 'alibaba/happy-horse/v1.1/reference-to-video' });
+    expect(out.prompt).toBe('character1 waves in character2');
+  });
+
+  it('counts from zero for Grok', () => {
+    const out = bindVideoReferences({ ...base, endpointId: 'xai/grok-imagine-video/v1.5/reference-to-video' });
+    expect(out.prompt).toBe('<IMAGE_0> waves in <IMAGE_1>');
+  });
+
+  it('leaves the prompt untouched for list-order models', () => {
+    const out = bindVideoReferences({ ...base, endpointId: 'fal-ai/veo3.1/reference-to-video' });
+    expect(out.prompt).toBe('ACTOR_REF waves in SCENE_REF');
+  });
+
+  it('prepends a legend for an unclassified endpoint', () => {
+    const out = bindVideoReferences({ ...base, endpointId: 'vendor/unknown/reference-to-video' });
+    expect(out.prompt).toBe(
+      'Reference image 1 is ACTOR_REF. Reference image 2 is SCENE_REF. ACTOR_REF waves in SCENE_REF',
+    );
+  });
+
+  it('does not rewrite when the author already wrote the tokens', () => {
+    const out = bindVideoReferences({
+      endpointId: 'minimax/h3/reference-to-video',
+      prompt: 'Image 2 is the set; Image 1 walks into it',
+      images: [ACTOR, SCENE],
+    });
+    expect(out.prompt).toBe('Image 2 is the set; Image 1 walks into it');
+  });
+
+  it('sends basket order per modality regardless of dialect', () => {
+    const out = bindVideoReferences({
+      endpointId: 'minimax/h3-max/reference-to-video',
+      prompt: 'MOVE_REF drives the camera over SCENE_REF',
+      images: [ACTOR, SCENE],
+      videos: [MOVE],
+    });
+    expect(out.images).toEqual([ACTOR.url, SCENE.url]);
+    expect(out.videos).toEqual([MOVE.url]);
+    expect(out.prompt).toBe('Video 1 drives the camera over Image 2');
+  });
+
+  it('never renames a modality the dialect cannot address', () => {
+    // Happy Horse has no video references at all; a clip in the basket must
+    // not turn into a character token.
+    const out = bindVideoReferences({
+      endpointId: 'alibaba/happy-horse/v1.1/reference-to-video',
+      prompt: 'ACTOR_REF waves, MOVE_REF pans',
+      images: [ACTOR],
+      videos: [MOVE],
+    });
+    expect(out.prompt).toBe('character1 waves, MOVE_REF pans');
+  });
+});
+
+describe('videoReferenceCaps', () => {
+  it('gives Veo its 3 blended images and no clips', () => {
+    expect(videoReferenceCaps('fal-ai/veo3.1/reference-to-video')).toEqual({
+      images: 3,
+      videos: 0,
+      audios: 0,
+    });
+  });
+
+  it('gives Seedance 2.5 its much larger budget', () => {
+    expect(videoReferenceCaps('bytedance/seedance-2.5/reference-to-video').images).toBe(30);
+  });
+
+  it('keeps Seedance 2.0 at 9 + 3', () => {
+    const caps = videoReferenceCaps('bytedance/seedance-2.0/reference-to-video');
+    expect([caps.images, caps.videos]).toEqual([9, 3]);
+  });
+
+  it('defaults an unknown endpoint to a usable budget rather than a timid one', () => {
+    // Truncating a basket the model would have accepted is an invisible
+    // failure; letting the model reject it is a visible one.
+    expect(videoReferenceCaps('vendor/unknown/reference-to-video')).toEqual({
+      images: 9,
+      videos: 3,
+      audios: 3,
+    });
+  });
+});
+
+describe('videoReferenceToken', () => {
+  it('spells each dialect the way its model does', () => {
+    expect(videoReferenceToken('seedance', 'image', 0)).toBe('@Image1');
+    expect(videoReferenceToken('positional', 'video', 1)).toBe('Video 2');
+    expect(videoReferenceToken('character', 'image', 2)).toBe('character3');
+    expect(videoReferenceToken('bracket', 'image', 0)).toBe('<IMAGE_0>');
+  });
+
+  it('returns null where there is no token to show', () => {
+    // The panel renders no chip for these rather than a misleading one.
+    expect(videoReferenceToken('none', 'image', 0)).toBeNull();
+    expect(videoReferenceToken('legend', 'image', 0)).toBeNull();
+    expect(videoReferenceToken('character', 'video', 0)).toBeNull();
+    expect(videoReferenceToken('bracket', 'audio', 0)).toBeNull();
   });
 });

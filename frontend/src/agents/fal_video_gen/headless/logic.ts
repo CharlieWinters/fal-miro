@@ -25,7 +25,7 @@ import {
   type GenSettings,
 } from '../../../shared/storage';
 import { estimateCostUSD, reportedInferenceSeconds } from '../../../shared/cost';
-import { bindSeedanceReferences, type Ref } from '../../../shared/referenceBinding';
+import { bindVideoReferences, type Ref } from '../../../shared/referenceBinding';
 import { parseFalInputSchema, pickAspectRatioField } from '../../../shared/schema';
 import { broadcastUpdate } from '../../../headless/communications';
 import { POLL_BUDGET, pollStatus as sharedPollStatus, shouldLeaveForResume as isTimeout } from '../../../shared/pollStatus';
@@ -63,7 +63,19 @@ export type VideoGenPayload = {
    * - Veo (`blend: true`): images only, passed as-is into image_urls and blended
    *   ("ingredients"); no @token rewrite, no video/audio refs.
    */
-  references?: { imageIds?: string[]; videoIds?: string[]; audioIds?: string[]; blend?: boolean };
+  references?: {
+    imageIds?: string[];
+    videoIds?: string[];
+    audioIds?: string[];
+    blend?: boolean;
+    /**
+     * The input field each modality belongs in, read off the model's schema by
+     * the panel. Absent on jobs persisted before this existed, which
+     * resume_jobs can still replay — hence the Seedance-shaped fallbacks at
+     * the use site rather than required properties here.
+     */
+    fields?: { image?: string; video?: string; audio?: string };
+  };
   /** The settings card this run was started from, if reopened from one — the
    *  output places beside it instead of below the usual source anchor. */
   cardAnchorId?: string;
@@ -113,6 +125,14 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
 
   if (references) {
     // Reference-to-video: resolve each board reference to a URL.
+    //
+    // Which input field each modality belongs in comes from the panel, which
+    // read it off this model's schema. The fallbacks are Seedance's names, and
+    // exist only for jobs persisted before the panel started sending them —
+    // resume_jobs replays those payloads verbatim after a board reload.
+    const imageField = references.fields?.image ?? 'image_urls';
+    const videoField = references.fields?.video ?? 'video_urls';
+    const audioField = references.fields?.audio ?? 'audio_urls';
     broadcastUpdate({ requestId, status: 'queued', message: 'Resolving references…' });
     const images: Ref[] = [];
     for (const id of references.imageIds ?? []) {
@@ -131,8 +151,8 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
       if (images.length === 0) {
         throw new Error('Select at least one reference image on the board.');
       }
-      finalInput.image_urls = images.map((r) => r.url);
-      console.log(`[fal_video_gen] blend references → ${images.length} image(s)`);
+      finalInput[imageField] = images.map((r) => r.url);
+      console.log(`[fal_video_gen] blend references → ${images.length} image(s) → ${imageField}`);
     } else {
       // Seedance: images + video/audio embeds, prompt adapted to @Image/@Video/@Audio tokens.
       const videos: Ref[] = [];
@@ -154,13 +174,20 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
       if (images.length === 0 && videos.length === 0 && audios.length === 0) {
         throw new Error('Select at least one reference image, video, or audio clip on the board.');
       }
-      const bound = bindSeedanceReferences({ prompt: finalInput.prompt, images, videos, audios });
-      if (bound.image_urls.length) finalInput.image_urls = bound.image_urls;
-      if (bound.video_urls.length) finalInput.video_urls = bound.video_urls;
-      if (bound.audio_urls.length) finalInput.audio_urls = bound.audio_urls;
+      const bound = bindVideoReferences({
+        endpointId,
+        prompt: finalInput.prompt,
+        images,
+        videos,
+        audios,
+      });
+      if (bound.images.length) finalInput[imageField] = bound.images;
+      if (bound.videos.length) finalInput[videoField] = bound.videos;
+      if (bound.audios.length) finalInput[audioField] = bound.audios;
       finalInput.prompt = bound.prompt;
       console.log(
-        `[fal_video_gen] references → ${images.length} image(s), ${videos.length} video(s), ${audios.length} audio clip(s)`,
+        `[fal_video_gen] references → ${images.length} image(s)→${imageField}, ` +
+          `${videos.length} video(s)→${videoField}, ${audios.length} audio→${audioField}`,
       );
     }
     // First image doubles as the placeholder/embed preview thumbnail.

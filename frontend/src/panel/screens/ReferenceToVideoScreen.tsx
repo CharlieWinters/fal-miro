@@ -3,8 +3,20 @@ import { startAgentJob } from '../communication';
 import { SchemaForm } from '../SchemaForm';
 import { api } from '../../lib/api';
 import { COMMON_ARGS, isBlendReference, type FalModel } from '../../shared/falCatalog';
-import { parseFalInputSchema, defaultsFor, pickAudioReferenceField, type Field } from '../../shared/schema';
-import { bindSeedanceReferences } from '../../shared/referenceBinding';
+import {
+  parseFalInputSchema,
+  defaultsFor,
+  pickAudioReferenceField,
+  pickReferenceField,
+  pickVideoReferenceField,
+  type Field,
+} from '../../shared/schema';
+import {
+  bindVideoReferences,
+  videoReferenceCaps,
+  videoReferenceDialect,
+  videoReferenceToken,
+} from '../../shared/referenceBinding';
 
 import { PromptBasket, assemblePrompt } from '../PromptBasket';
 import { BasketPanel } from '../Basket';
@@ -24,17 +36,24 @@ import {
   type RecipeSeed,
 } from '../../shared/recipeCard';
 
-// Caps. Seedance 2.0: up to 9 reference images + 3 video clips (≤12 total).
-// Audio cap is a placeholder pending confirmed Seedance 2.5 docs — adjust once
-// Fal publishes the real limit.
-// Veo blends images only ("ingredients"); its docs show 3.
-const SEEDANCE_MAX_IMAGES = 9;
-const SEEDANCE_MAX_VIDEOS = 3;
-const SEEDANCE_MAX_AUDIO = 3;
-const VEO_MAX_IMAGES = 3;
+// Caps per endpoint live in shared/referenceBinding.ts (videoReferenceCaps),
+// next to the prompt dialects, because both are prose in Fal's schemas rather
+// than machine-readable limits.
+//
+// The fields references flow into are NOT listed here. They used to be —
+// ['image_urls', 'video_urls', 'audio_urls'], Seedance's names — which is why
+// every model that calls them `reference_image_urls` (MiniMax H3, H3 Max,
+// Wan 3.x, Grok) received no references at all and failed with "At least one
+// reference image, video, or audio must be provided". They now come from the
+// model's own schema via pickReferenceField and its siblings.
 
-// Array fields the picker drives — hidden from the generic form.
-const REFERENCE_FIELDS = ['image_urls', 'video_urls', 'audio_urls'];
+// What each dialect's tokens look like, for the preview note only.
+const DIALECT_EXAMPLE: Record<string, string> = {
+  seedance: '@Image1, @Video1',
+  positional: 'Image 1, Video 1',
+  character: 'character1',
+  bracket: '<IMAGE_0>, counting from zero',
+};
 
 const PROMPT_FALLBACK: Field[] = [{ name: 'prompt', label: 'Prompt', kind: 'text', required: true }];
 
@@ -45,7 +64,7 @@ type SchemaState =
 
 export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?: RecipeSeed | null }) {
   const blend = isBlendReference(model); // Veo: images-only blend, no @tokens
-  const maxImages = blend ? VEO_MAX_IMAGES : SEEDANCE_MAX_IMAGES;
+  const caps = useMemo(() => videoReferenceCaps(model.endpointId), [model.endpointId]);
 
   const [schema, setSchema] = useState<SchemaState>({ status: 'loading' });
   const [values, setValues] = useState<Record<string, unknown>>({});
@@ -89,6 +108,20 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
   // Veo and older Seedance versions don't, so this stays empty for them.
   const audioField = useMemo(() => (blend ? null : pickAudioReferenceField(fields)), [blend, fields]);
   const supportsAudio = Boolean(audioField);
+  // Same treatment for images and video clips. Reading these rather than
+  // assuming Seedance's names is what makes this screen work for every
+  // reference-to-video endpoint instead of just ByteDance's and Kling's.
+  const imageRefField = useMemo(() => pickReferenceField(fields), [fields]);
+  const videoRefField = useMemo(() => (blend ? null : pickVideoReferenceField(fields)), [blend, fields]);
+  const supportsVideoRefs = Boolean(videoRefField);
+  // What the generic form must not also render, now that the baskets own them.
+  const referenceFieldNames = useMemo(
+    () =>
+      [imageRefField?.name, videoRefField?.name, audioField?.name].filter(
+        (n): n is string => Boolean(n),
+      ),
+    [imageRefField, videoRefField, audioField],
+  );
 
   // Merge a fresh seed's static input over the schema defaults once they're
   // loaded, then apply any connected-sticky field overrides (e.g. a "Prompt:
@@ -121,32 +154,45 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
 
   // Caps are applied here, at send time, rather than by refusing the add — the
   // basket shows everything you put in it and warns when the tail won't fit.
-  const images = imageBasket.items.slice(0, maxImages);
-  const videos = blend ? [] : videoBasket.items.slice(0, SEEDANCE_MAX_VIDEOS);
-  const audios = supportsAudio ? audioBasket.items.slice(0, SEEDANCE_MAX_AUDIO) : [];
+  const images = imageBasket.items.slice(0, caps.images);
+  // A model that declares no video field gets no video references, however
+  // many are sitting in the basket — Kling, Happy Horse and Grok take images
+  // only, and sending clips they never declared is how silent rejections start.
+  const videos = supportsVideoRefs ? videoBasket.items.slice(0, caps.videos) : [];
+  const audios = supportsAudio ? audioBasket.items.slice(0, caps.audios) : [];
   // Each basket warns about its own overflow, so nothing global is needed here.
   const referenceFrameId = seed?.frameId ?? undefined;
 
-  // Seedance only: preview the @token mapping + adapted prompt (item ids stand
-  // in for urls — the agent re-binds with real urls in the same order).
+  // Preview the prompt exactly as the agent will send it, for whichever
+  // dialect this endpoint speaks (item ids stand in for urls — the agent
+  // re-binds with real urls in the same order). Previously this was shown for
+  // Seedance only, which meant the models that needed it most — the ones whose
+  // dialect nobody could guess — showed nothing.
   const bound = useMemo(
     () =>
-      blend
-        ? null
-        : bindSeedanceReferences({
-            prompt,
-            images: images.map((i) => ({ url: i.id, title: i.label })),
-            videos: videos.map((v) => ({ url: v.id, title: v.label })),
-            audios: audios.map((a) => ({ url: a.id, title: a.label })),
-          }),
-    [blend, prompt, images, videos, audios],
+      bindVideoReferences({
+        endpointId: model.endpointId,
+        prompt,
+        images: images.map((i) => ({ url: i.id, title: i.label })),
+        videos: videos.map((v) => ({ url: v.id, title: v.label })),
+        audios: audios.map((a) => ({ url: a.id, title: a.label })),
+      }),
+    [model.endpointId, prompt, images, videos, audios],
   );
+  const dialect = useMemo(() => videoReferenceDialect(model.endpointId), [model.endpointId]);
 
   /**
    * Why Generate can't run yet, or null — drives both the disabled button and
    * the message. Same shape as the other two screens.
    */
   const blockReason: string | null = (() => {
+    // Refuse to submit into a field the model does not have. Without this the
+    // panel happily sent references under Seedance's names to models that use
+    // different ones, and the only symptom was a rejection from Fal minutes
+    // later saying no references had been provided.
+    if (schema.status !== 'loading' && referenceFieldNames.length === 0) {
+      return 'This model declares no reference field the panel recognises — use the generic model form for it.';
+    }
     if (imageBasket.hasMissing) return 'An image in the basket is no longer on the board — remove it first.';
     if (videoBasket.hasMissing) return 'A video in the basket is no longer on the board — remove it first.';
     if (audioBasket.hasMissing) return 'An audio clip in the basket is no longer on the board — remove it first.';
@@ -170,7 +216,7 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
       setNote(blockReason);
       return;
     }
-    const input = buildInput(fields, values);
+    const input = buildInput(fields, values, referenceFieldNames);
     // The prompt basket owns this field: SchemaForm is told to hide it (see
     // `hide` below), so `values` never carries a prompt and buildInput can't
     // find one. Inject the assembled value — notes in basket order, then the
@@ -185,13 +231,18 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
         endpointId: model.endpointId,
         input,
         placeholderRatio: ratioFromValues(values),
-        references: blend
-          ? { imageIds: images.map((i) => i.id), blend: true }
-          : {
-              imageIds: images.map((i) => i.id),
-              videoIds: videos.map((v) => v.id),
-              ...(supportsAudio ? { audioIds: audios.map((a) => a.id) } : {}),
-            },
+        references: {
+          imageIds: images.map((i) => i.id),
+          ...(supportsVideoRefs ? { videoIds: videos.map((v) => v.id) } : {}),
+          ...(supportsAudio ? { audioIds: audios.map((a) => a.id) } : {}),
+          ...(blend ? { blend: true } : {}),
+          // Resolved from this model's schema, so the agent never has to guess.
+          fields: {
+            ...(imageRefField ? { image: imageRefField.name } : {}),
+            ...(videoRefField ? { video: videoRefField.name } : {}),
+            ...(audioField ? { audio: audioField.name } : {}),
+          },
+        },
         ...(seed ? { cardAnchorId: seed.cardId } : {}),
         ...(referenceFrameId ? { referenceFrameId } : {}),
       },
@@ -205,7 +256,7 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
   // multi-image/multi-video reference list, resolved fresh on reopen.
   const onSaveCard = async () => {
     setNote(null);
-    const input = buildInput(fields, values);
+    const input = buildInput(fields, values, referenceFieldNames);
     // Same reason as onGenerate — the basket owns the prompt, so the card has
     // to record the assembled value or reopening it comes back with none.
     if (prompt.trim()) input.prompt = prompt;
@@ -267,16 +318,19 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
           <BasketPanel
             basket={imageBasket}
             title="Image references"
-            cap={maxImages}
-            showTokens={!blend}
+            cap={caps.images}
+            showTokens={Boolean(videoReferenceToken(dialect, 'image', 0))}
+            tokenFor={(i) => videoReferenceToken(dialect, 'image', i) ?? ''}
             onInsertToken={(t) => setPromptText((p) => (p && !/\s$/.test(p) ? `${p} ${t}` : p + t))}
           />
 
-          {!blend && (
+          {supportsVideoRefs && (
             <BasketPanel
               basket={videoBasket}
               title="Video references"
-              cap={SEEDANCE_MAX_VIDEOS}
+              cap={caps.videos}
+              showTokens={Boolean(videoReferenceToken(dialect, 'video', 0))}
+              tokenFor={(i) => videoReferenceToken(dialect, 'video', i) ?? ''}
               onInsertToken={(t) => setPromptText((p) => (p && !/\s$/.test(p) ? `${p} ${t}` : p + t))}
             />
           )}
@@ -285,7 +339,9 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
             <BasketPanel
               basket={audioBasket}
               title="Audio"
-              cap={SEEDANCE_MAX_AUDIO}
+              cap={caps.audios}
+              showTokens={Boolean(videoReferenceToken(dialect, 'audio', 0))}
+              tokenFor={(i) => videoReferenceToken(dialect, 'audio', i) ?? ''}
               onInsertToken={(t) => setPromptText((p) => (p && !/\s$/.test(p) ? `${p} ${t}` : p + t))}
             />
           )}
@@ -303,25 +359,40 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
             values={values}
             onChange={(name, value) => setValues((v) => ({ ...v, [name]: value }))}
             hide={[
-              ...(audioField && !REFERENCE_FIELDS.includes(audioField.name)
-                ? [...REFERENCE_FIELDS, audioField.name]
-                : REFERENCE_FIELDS),
+              ...referenceFieldNames,
               // The prompt basket owns this field.
               'prompt',
             ]}
           />
 
-          {!blend && bound && (
+          {bound && (
             <details className="preview">
-              <summary>Prompt sent to Seedance</summary>
+              <summary>Prompt sent to {model.label}</summary>
               <div className="preview-body">
                 <div>
                   <span className="k">Prompt</span>
                   <span className="v">{bound.prompt.trim() || '—'}</span>
                 </div>
                 <div className="preview-note">
-                  Board titles you mention are rewritten to @Image/@Video{supportsAudio ? '/@Audio' : ''}{' '}
-                  tokens. Write the tokens yourself to control the order.
+                  {dialect === 'none' ? (
+                    <>
+                      This model reads references in basket order and has no way to address them from
+                      the prompt, so the prompt is sent exactly as written.
+                    </>
+                  ) : dialect === 'legend' ? (
+                    <>
+                      No documented token scheme for this model, so a plain &ldquo;Reference image N is
+                      NAME&rdquo; legend is prepended and the prompt is left alone.
+                    </>
+                  ) : (
+                    <>
+                      Board titles you mention are rewritten to this model&rsquo;s own reference tokens
+                      ({DIALECT_EXAMPLE[dialect]}). Write them yourself to control the order.
+                    </>
+                  )}
+                  {referenceFieldNames.length > 0 && (
+                    <> Sent as <code>{referenceFieldNames.join('</code>, <code>')}</code>.</>
+                  )}
                 </div>
               </div>
             </details>
@@ -349,12 +420,16 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
   );
 }
 
-function buildInput(fields: Field[], values: Record<string, unknown>): Record<string, unknown> {
+function buildInput(
+  fields: Field[],
+  values: Record<string, unknown>,
+  referenceFieldNames: string[],
+): Record<string, unknown> {
   const jsonFields = new Set(fields.filter((f) => f.kind === 'json').map((f) => f.name));
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(values)) {
     if (v === undefined || v === null || v === '') continue;
-    if (REFERENCE_FIELDS.includes(k)) continue; // driven by the picker
+    if (referenceFieldNames.includes(k)) continue; // driven by the baskets
     if (jsonFields.has(k) && typeof v === 'string') {
       try {
         out[k] = JSON.parse(v);
