@@ -3,6 +3,7 @@ import { videoEmbedUrl } from '../../lib/api';
 import { createEmbedAtPosition } from '../../shared/boardHelpers';
 import {
   LONG_CLIP_SECONDS,
+  MIN_VIDEO_DIMENSION,
   archiveMetadataUrl,
   containerWarning,
   embedBox,
@@ -20,6 +21,13 @@ type Resolved = {
   origin: 'direct' | 'archive.org';
   bytes: number | null;
   format: string | null;
+  /** Dimensions from archive.org's metadata, where it publishes them. The
+   *  browser probe below is authoritative once it lands; this covers the gap
+   *  before that, and the case where playback fails entirely. */
+  width: number | null;
+  height: number | null;
+  /** archive.org had nothing above the Fal minimum to offer. */
+  belowMinimum: boolean;
 };
 
 type Probe = { duration: number; width: number; height: number };
@@ -68,7 +76,15 @@ export function AddVideoFromUrlScreen() {
       return;
     }
     if (parsed.kind === 'direct') {
-      setResolved({ url: parsed.url, origin: 'direct', bytes: null, format: null });
+      setResolved({
+        url: parsed.url,
+        origin: 'direct',
+        bytes: null,
+        format: null,
+        width: null,
+        height: null,
+        belowMinimum: false,
+      });
       return;
     }
 
@@ -87,7 +103,15 @@ export function AddVideoFromUrlScreen() {
         setError(pick.error);
         return;
       }
-      setResolved({ url: pick.url, origin: 'archive.org', bytes: pick.bytes, format: pick.format });
+      setResolved({
+        url: pick.url,
+        origin: 'archive.org',
+        bytes: pick.bytes,
+        format: pick.format,
+        width: pick.width,
+        height: pick.height,
+        belowMinimum: pick.belowMinimum,
+      });
     } catch (e) {
       setError(`Couldn’t read that archive.org item: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -123,6 +147,14 @@ export function AddVideoFromUrlScreen() {
   const container = resolved ? containerWarning(resolved.url) : null;
   const tooLong = probe !== null && Number.isFinite(probe.duration) && probe.duration > LONG_CLIP_SECONDS;
   const size = formatBytes(resolved?.bytes ?? null);
+
+  // The browser probe is authoritative — it measured the actual file. Fall
+  // back to archive.org's published dimensions so the warning still appears
+  // when playback never got going.
+  const width = probe?.width || resolved?.width || null;
+  const height = probe?.height || resolved?.height || null;
+  const tooSmall =
+    width !== null && height !== null && (width < MIN_VIDEO_DIMENSION || height < MIN_VIDEO_DIMENSION);
 
   return (
     <div className="screen">
@@ -188,7 +220,7 @@ export function AddVideoFromUrlScreen() {
             {probe && (
               <div>
                 {formatDuration(probe.duration)}
-                {probe.width > 0 ? ` · ${probe.width}×${probe.height}` : ''}
+                {width && height ? ` · ${width}×${height}` : ''}
                 {size ? ` · ${size}` : ''}
               </div>
             )}
@@ -200,6 +232,17 @@ export function AddVideoFromUrlScreen() {
               Your browser couldn’t play that URL, so the board embed probably won’t either. It may
               still work as a model input if Fal can read it — check the link opens on its own
               first.
+            </div>
+          )}
+
+          {tooSmall && (
+            <div className="notice">
+              {width}×{height} is below Fal's {MIN_VIDEO_DIMENSION}×{MIN_VIDEO_DIMENSION} minimum for
+              video inputs, so models will reject it with `video_too_small` — and anything you merge
+              or edit from it inherits the same size.{' '}
+              {resolved.origin === 'archive.org' && resolved.belowMinimum
+                ? 'Every playable file in this archive.org item is this small; there is no larger one to pick.'
+                : 'It is still fine on the board, and fine for frame capture.'}
             </div>
           )}
 
