@@ -186,13 +186,33 @@ export type VideoReferenceCaps = { images: number; videos: number; audios: numbe
 /**
  * How many of each modality an endpoint accepts.
  *
- * Prose again ("up to 9 images", "Maximum 7 images", "at most 12 files"), so
- * again a table. The default is the common 9/3/3 shape rather than something
- * timid: truncating a basket the model would have accepted is a worse failure
- * than letting the model reject it with a clear message, because the former is
+ * `fromSchema` carries each field's own `maxItems`, and wins wherever it is
+ * present: it is the model's answer rather than ours, and it cannot go stale.
+ * Five of the reference-to-video flagships publish it (H3 and H3 Max 9,
+ * Seedance 2.0 9, Wan 3.0 10, Grok 7) — and all five agree with the table
+ * below, which is some comfort about the four that publish nothing and still
+ * need it (Seedance 2.5, Veo, Kling, Happy Horse state their limits only in
+ * prose, or only in their docs).
+ *
+ * The default is the common 9/3/3 shape rather than something timid:
+ * truncating a basket the model would have accepted is a worse failure than
+ * letting the model reject it with a clear message, because the former is
  * invisible.
  */
-export function videoReferenceCaps(endpointId: string): VideoReferenceCaps {
+export function videoReferenceCaps(
+  endpointId: string,
+  fromSchema?: { images?: number; videos?: number; audios?: number },
+): VideoReferenceCaps {
+  const table = capsTable(endpointId);
+  return {
+    images: fromSchema?.images ?? table.images,
+    videos: fromSchema?.videos ?? table.videos,
+    audios: fromSchema?.audios ?? table.audios,
+  };
+}
+
+/** The hand-maintained fallback, for models that publish no `maxItems`. */
+function capsTable(endpointId: string): VideoReferenceCaps {
   if (/veo/i.test(endpointId)) return { images: 3, videos: 0, audios: 0 };
   if (/seedance-2\.5/i.test(endpointId)) return { images: 30, videos: 10, audios: 10 };
   if (/seedance/i.test(endpointId)) return { images: 9, videos: 3, audios: 3 };

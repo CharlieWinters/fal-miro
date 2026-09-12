@@ -30,6 +30,16 @@ export type Field = {
   videoMultiple?: boolean;
   /** For `audio` fields: true when it takes an array (e.g. `audio_urls`). */
   audioMultiple?: boolean;
+  /**
+   * The array's own `maxItems`, when the model publishes one.
+   *
+   * Worth reading even though it is often absent: of the reference-to-video
+   * flagships, five declare it (H3 and H3 Max 9, Seedance 2.0 9, Wan 3.0 10,
+   * Grok 7) and four say nothing at all. Where it exists it is the model's own
+   * answer, and better than a constant of ours that goes stale the moment Fal
+   * raises a limit.
+   */
+  maxItems?: number;
 };
 
 type AnySchema = Record<string, any>;
@@ -78,6 +88,24 @@ function primitiveType(root: AnySchema, prop: AnySchema): string | undefined {
       for (const b of branches) {
         const r = deref(root, b);
         if (typeof r.type === 'string' && r.type !== 'null') return r.type;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * An array property's `maxItems`, looking through the `anyOf` wrapper a
+ * nullable array arrives in (`anyOf: [{type: array, maxItems: 9}, {type: null}]`).
+ */
+function maxItemsOf(root: AnySchema, prop: AnySchema): number | undefined {
+  if (typeof prop.maxItems === 'number') return prop.maxItems;
+  for (const key of ['anyOf', 'oneOf', 'allOf'] as const) {
+    const branches = prop[key];
+    if (Array.isArray(branches)) {
+      for (const b of branches) {
+        const r = deref(root, b);
+        if (typeof r.maxItems === 'number') return r.maxItems;
       }
     }
   }
@@ -133,17 +161,17 @@ function classify(root: AnySchema, name: string, rawProp: AnySchema, required: b
 
   if (isImageField(name, prop)) {
     const multiple = primitiveType(root, prop) === 'array' || /urls$/i.test(name);
-    return { ...base, kind: 'image', imageMultiple: multiple };
+    return { ...base, kind: 'image', imageMultiple: multiple, maxItems: maxItemsOf(root, prop) };
   }
 
   if (isVideoField(name, prop)) {
     const multiple = primitiveType(root, prop) === 'array' || /urls$/i.test(name);
-    return { ...base, kind: 'video', videoMultiple: multiple };
+    return { ...base, kind: 'video', videoMultiple: multiple, maxItems: maxItemsOf(root, prop) };
   }
 
   if (isAudioField(name, prop)) {
     const multiple = primitiveType(root, prop) === 'array' || /urls$/i.test(name);
-    return { ...base, kind: 'audio', audioMultiple: multiple };
+    return { ...base, kind: 'audio', audioMultiple: multiple, maxItems: maxItemsOf(root, prop) };
   }
 
   const type = primitiveType(root, prop);
@@ -241,7 +269,7 @@ export function splitFields(
  */
 export function pickReferenceField(
   fields: Field[],
-): { name: string; multiple: boolean; required: boolean } | null {
+): { name: string; multiple: boolean; required: boolean; maxItems?: number } | null {
   const candidates = fields.filter((f) => f.kind === 'image' && !/mask/i.test(f.name));
   if (candidates.length === 0) return null;
   // Prefer the canonical primary-image field by name, then any *required* image
@@ -254,7 +282,12 @@ export function pickReferenceField(
     preferred.map((n) => candidates.find((f) => f.name === n)).find(Boolean) ??
     candidates.find((f) => f.required) ??
     candidates[0];
-  return { name: chosen.name, multiple: Boolean(chosen.imageMultiple), required: chosen.required };
+  return {
+    name: chosen.name,
+    multiple: Boolean(chosen.imageMultiple),
+    required: chosen.required,
+    maxItems: chosen.maxItems,
+  };
 }
 
 /**
@@ -264,7 +297,7 @@ export function pickReferenceField(
  */
 export function pickVideoReferenceField(
   fields: Field[],
-): { name: string; multiple: boolean; required: boolean } | null {
+): { name: string; multiple: boolean; required: boolean; maxItems?: number } | null {
   const candidates = fields.filter((f) => f.kind === 'video');
   if (candidates.length === 0) return null;
   const preferred = ['video_urls', 'video_url', 'input_video_url'];
@@ -272,7 +305,12 @@ export function pickVideoReferenceField(
     preferred.map((n) => candidates.find((f) => f.name === n)).find(Boolean) ??
     candidates.find((f) => f.required) ??
     candidates[0];
-  return { name: chosen.name, multiple: Boolean(chosen.videoMultiple), required: chosen.required };
+  return {
+    name: chosen.name,
+    multiple: Boolean(chosen.videoMultiple),
+    required: chosen.required,
+    maxItems: chosen.maxItems,
+  };
 }
 
 // The model's primary free-text field — the one a selected sticky's text (or
@@ -299,7 +337,7 @@ export function pickPromptField(fields: Field[]): Field | undefined {
  */
 export function pickAudioReferenceField(
   fields: Field[],
-): { name: string; multiple: boolean; required: boolean } | null {
+): { name: string; multiple: boolean; required: boolean; maxItems?: number } | null {
   const candidates = fields.filter((f) => f.kind === 'audio');
   if (candidates.length === 0) return null;
   const preferred = ['audio_urls', 'audio_url', 'input_audio_url'];
@@ -307,7 +345,12 @@ export function pickAudioReferenceField(
     preferred.map((n) => candidates.find((f) => f.name === n)).find(Boolean) ??
     candidates.find((f) => f.required) ??
     candidates[0];
-  return { name: chosen.name, multiple: Boolean(chosen.audioMultiple), required: chosen.required };
+  return {
+    name: chosen.name,
+    multiple: Boolean(chosen.audioMultiple),
+    required: chosen.required,
+    maxItems: chosen.maxItems,
+  };
 }
 
 // Fal's named-bucket size convention (e.g. FLUX's `image_size`), as an
