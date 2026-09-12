@@ -12,6 +12,7 @@ import {
   resolvePlaceholderAnchor,
   snapFrameRatio,
 } from '../../../shared/boardHelpers';
+import { describeFalError } from '../../../shared/falError';
 import {
   addActiveJob,
   removeActiveJob,
@@ -178,7 +179,7 @@ export async function run(payload: unknown, requestId = ''): Promise<GenericGenR
     const created = await api.run({ endpointId, input: finalInput });
     falRequestId = created.requestId;
   } catch (err) {
-    await replaceImageContent(placeholderId, makePlaceholderDataUrl(ratio, 'Failed to start'), 'Fal · Failed', {
+    await replaceImageContent(placeholderId, makePlaceholderDataUrl(ratio, 'Failed to start', describeFalError(err)), 'Fal · Failed', {
       x: targetX,
       y: targetY,
     });
@@ -226,7 +227,7 @@ export async function run(payload: unknown, requestId = ''): Promise<GenericGenR
       });
       throw err;
     }
-    await replaceImageContent(placeholderId, makePlaceholderDataUrl(ratio, 'Failed'), 'Fal · Failed', {
+    await replaceImageContent(placeholderId, makePlaceholderDataUrl(ratio, 'Failed', describeFalError(err)), 'Fal · Failed', {
       x: targetX,
       y: targetY,
     });

@@ -6,6 +6,7 @@ import {
   replaceImageContent,
   resolveAbsolutePosition,
 } from '../../../shared/boardHelpers';
+import { describeFalError } from '../../../shared/falError';
 import { addActiveJob, removeActiveJob, type GenSettings } from '../../../shared/storage';
 import { broadcastUpdate } from '../../../headless/communications';
 import { POLL_BUDGET, pollStatus as sharedPollStatus, shouldLeaveForResume as isTimeout } from '../../../shared/pollStatus';
@@ -81,7 +82,7 @@ export async function run(payload: unknown, requestId = ''): Promise<AdLayersJob
     const created = await api.run({ endpointId, input: finalInput });
     falRequestId = created.requestId;
   } catch (err) {
-    await replaceImageContent(placeholder.id, makePlaceholderDataUrl(ratio, 'Failed to start'), 'Fal · Failed', { x, y });
+    await replaceImageContent(placeholder.id, makePlaceholderDataUrl(ratio, 'Failed to start', describeFalError(err)), 'Fal · Failed', { x, y });
     throw err;
   }
 
@@ -123,7 +124,7 @@ export async function run(payload: unknown, requestId = ''): Promise<AdLayersJob
       });
       throw err;
     }
-    await replaceImageContent(placeholder.id, makePlaceholderDataUrl(ratio, 'Failed'), 'Fal · Failed', { x, y });
+    await replaceImageContent(placeholder.id, makePlaceholderDataUrl(ratio, 'Failed', describeFalError(err)), 'Fal · Failed', { x, y });
     await removeActiveJob(falRequestId);
     throw err;
   }
@@ -157,7 +158,9 @@ export async function run(payload: unknown, requestId = ''): Promise<AdLayersJob
 
   await replaceImageContent(
     placeholder.id,
-    makePlaceholderDataUrl(ratio, 'Failed'),
+    // No error object on this path — the job finished, it just finished badly,
+    // so the reason is whatever Fal put on the result.
+    makePlaceholderDataUrl(ratio, 'Failed', final.error ?? undefined),
     `Fal · ${final.status}`,
     { x, y },
   );
