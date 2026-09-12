@@ -64,7 +64,6 @@ type SchemaState =
 
 export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?: RecipeSeed | null }) {
   const blend = isBlendReference(model); // Veo: images-only blend, no @tokens
-  const caps = useMemo(() => videoReferenceCaps(model.endpointId), [model.endpointId]);
 
   const [schema, setSchema] = useState<SchemaState>({ status: 'loading' });
   const [values, setValues] = useState<Record<string, unknown>>({});
@@ -114,6 +113,19 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
   const imageRefField = useMemo(() => pickReferenceField(fields), [fields]);
   const videoRefField = useMemo(() => (blend ? null : pickVideoReferenceField(fields)), [blend, fields]);
   const supportsVideoRefs = Boolean(videoRefField);
+  // Caps: the field's own maxItems where the model publishes one, else the
+  // table. A field that is not an array takes exactly one item however
+  // generous the table is.
+  const caps = useMemo(
+    () =>
+      videoReferenceCaps(model.endpointId, {
+        images: imageRefField ? (imageRefField.multiple ? imageRefField.maxItems : 1) : undefined,
+        videos: videoRefField ? (videoRefField.multiple ? videoRefField.maxItems : 1) : undefined,
+        audios: audioField ? (audioField.multiple ? audioField.maxItems : 1) : undefined,
+      }),
+    [model.endpointId, imageRefField, videoRefField, audioField],
+  );
+
   // What the generic form must not also render, now that the baskets own them.
   const referenceFieldNames = useMemo(
     () =>

@@ -413,3 +413,30 @@ describe('videoReferenceToken', () => {
     expect(videoReferenceToken('bracket', 'audio', 0)).toBeNull();
   });
 });
+
+describe('videoReferenceCaps — the schema wins where it speaks', () => {
+  it('takes maxItems over the table', () => {
+    // Fal raising H3's limit should not need a code change here.
+    expect(videoReferenceCaps('minimax/h3-max/reference-to-video', { images: 12 }).images).toBe(12);
+  });
+
+  it('falls back per modality, not all-or-nothing', () => {
+    // H3 publishes maxItems on its images and nothing on its clips.
+    const caps = videoReferenceCaps('minimax/h3-max/reference-to-video', { images: 9 });
+    expect(caps).toEqual({ images: 9, videos: 3, audios: 3 });
+  });
+
+  it('still uses the table for models that publish no maxItems at all', () => {
+    // Veo, Kling, Happy Horse and Seedance 2.5 state their limits only in prose.
+    expect(videoReferenceCaps('fal-ai/veo3.1/reference-to-video', {})).toEqual({
+      images: 3,
+      videos: 0,
+      audios: 0,
+    });
+  });
+
+  it('treats a zero cap from the schema as real, not missing', () => {
+    // ?? rather than ||, or a model declaring no clips would silently get 3.
+    expect(videoReferenceCaps('minimax/h3/reference-to-video', { videos: 0 }).videos).toBe(0);
+  });
+});
