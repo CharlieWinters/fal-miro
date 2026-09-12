@@ -154,7 +154,7 @@ export async function run(payload: unknown, requestId = ''): Promise<MotionResul
 
   await replaceImageContent(
     placeholderId,
-    makePlaceholderDataUrl(MOTION_RATIO, 'Failed'),
+    makePlaceholderDataUrl(MOTION_RATIO, 'Failed', final.error),
     `Fal · ${final.status}`,
     { x: targetX, y: targetY },
   );

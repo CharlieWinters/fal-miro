@@ -254,7 +254,7 @@ export async function run(payload: unknown, requestId = ''): Promise<GenericGenR
     return { requestId: falRequestId, itemId, outputUrl, kind };
   }
 
-  await replaceImageContent(placeholderId, makePlaceholderDataUrl(ratio, 'Failed'), `Fal · ${final.status}`, {
+  await replaceImageContent(placeholderId, makePlaceholderDataUrl(ratio, 'Failed', final.error), `Fal · ${final.status}`, {
     x: targetX,
     y: targetY,
   });

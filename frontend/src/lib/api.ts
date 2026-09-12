@@ -17,6 +17,7 @@
 // closed rather than silently spending someone else's Fal credits.
 import { fal } from '@fal-ai/client';
 import { extractOutputUrls, normalizeStatus } from '../shared/falOutput';
+import { describeFalError, hasModelDetail, httpStatusOf, terminalStatusFor } from '../shared/falError';
 
 export type ConnectionConfig =
   | { mode: 'backend'; url: string; key: string }
@@ -156,14 +157,44 @@ async function clientRun(body: RunRequest): Promise<RunResponse> {
 
 async function clientGetStatus(endpointId: string, requestId: string): Promise<StatusResponse> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const status: any = await fal.queue.status(endpointId, { requestId, logs: false });
+  let status: any;
+  try {
+    status = await fal.queue.status(endpointId, { requestId, logs: false });
+  } catch (err) {
+    // Fal reports a request that failed *on its side* — bad inputs, no media
+    // generated, a safety block — as a 4xx on the status call. That is a
+    // terminal answer about the job, not a problem reaching Fal, so it has to
+    // come back as a status the poller can finish on. Thrown, it is counted as
+    // a transport error, retried five times, and reported as PollUnreachable,
+    // which every caller deliberately leaves for resume_jobs to collect later
+    // — leaving a placeholder that says "generating" and a panel that says
+    // "resuming" for a job that can never come back, with the reason Fal sent
+    // in full on the very first poll never shown.
+    //
+    // The backend route already does exactly this (terminalStatusFor in
+    // backend/src/app.ts). Client mode had no equivalent, so this was the only
+    // path where a permanent rejection looked like a flaky network.
+    const terminal = terminalStatusFor(httpStatusOf(err), hasModelDetail(err));
+    if (!terminal) throw err;
+    return { requestId, endpointId, status: terminal, error: describeFalError(err) };
+  }
   const normalized = normalizeStatus(status?.status);
   const queuePosition = typeof status?.queue_position === 'number' ? status.queue_position : null;
   if (normalized !== 'SUCCEEDED') {
     return { requestId, endpointId, status: normalized, queuePosition };
   }
+  // The result call rejects the same way the status call does, and this is
+  // where `no_media_generated` arrives — the job ran, produced nothing usable,
+  // and Fal says so with a 4xx. Terminal, not transient.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result: any = await fal.queue.result(endpointId, { requestId });
+  let result: any;
+  try {
+    result = await fal.queue.result(endpointId, { requestId });
+  } catch (err) {
+    const terminal = terminalStatusFor(httpStatusOf(err), hasModelDetail(err));
+    if (!terminal) throw err;
+    return { requestId, endpointId, status: terminal, error: describeFalError(err) };
+  }
   const data = result?.data ?? result ?? {};
   return { requestId, endpointId, status: 'SUCCEEDED', output: extractOutputUrls(data), data };
 }

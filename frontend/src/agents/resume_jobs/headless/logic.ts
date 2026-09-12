@@ -90,7 +90,7 @@ async function abandon(job: ActiveJob, why: string): Promise<void> {
   try {
     await replaceImageContent(
       job.placeholderId,
-      makePlaceholderDataUrl(job.settings.ratio, 'Failed'),
+      makePlaceholderDataUrl(job.settings.ratio, 'Failed', why),
       `Fal · ${why}`,
       job.targetPosition,
     );
@@ -150,7 +150,7 @@ async function finalize(job: ActiveJob, s: StatusResponse): Promise<void> {
     } else {
       await replaceImageContent(
         job.placeholderId,
-        makePlaceholderDataUrl(job.settings.ratio, 'Failed'),
+        makePlaceholderDataUrl(job.settings.ratio, 'Failed', s.error),
         `Fal · ${s.status}`,
         pos,
       );

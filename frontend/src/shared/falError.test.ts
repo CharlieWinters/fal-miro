@@ -4,7 +4,7 @@
 // flattened, client mode hands over Fal's raw object with body.detail intact.
 
 import { describe, it, expect } from 'vitest';
-import { describeFalError } from './falError';
+import { describeFalError, terminalStatusFor, hasModelDetail, httpStatusOf } from './falError';
 
 /** The real 422 body Fal returns for an undersized video reference. */
 const tooSmall = {
@@ -80,5 +80,87 @@ describe('describeFalError', () => {
     expect(describeFalError(null)).toBe('Unknown error');
     expect(describeFalError({})).toBe('Unknown error');
     expect(typeof describeFalError(42)).toBe('string');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Terminal vs transient.
+//
+// The live failure: H3 Max rejected a reference image for being under 256x256.
+// Fal said so precisely, on the first status poll, with a 422 and a detail
+// body. In client mode nothing translated that, so `pollStatus` counted it as
+// a transport error, retried five times with backoff, and threw
+// PollUnreachable — which every caller deliberately leaves alone for
+// resume_jobs. The board kept a placeholder reading "generating", the panel
+// kept saying "resuming", and the reason was never shown anywhere.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('terminalStatusFor', () => {
+  it('treats a validation rejection as a finished, failed job', () => {
+    expect(terminalStatusFor(422)).toBe('FAILED');
+    expect(terminalStatusFor(400)).toBe('FAILED');
+  });
+
+  it('treats a request Fal has never heard of as unknown', () => {
+    expect(terminalStatusFor(404)).toBe('UNKNOWN');
+  });
+
+  it('keeps our own fault transient, even with a detail body', () => {
+    // A rejected or throttled key says nothing about whether the generation
+    // would have worked, so these are worth retrying.
+    for (const code of [401, 403, 408, 429]) {
+      expect(terminalStatusFor(code, true)).toBeNull();
+    }
+  });
+
+  it('keeps an unexplained 5xx transient', () => {
+    expect(terminalStatusFor(500)).toBeNull();
+    expect(terminalStatusFor(503)).toBeNull();
+  });
+
+  it('trusts a model-level detail body over the status code', () => {
+    // Bria's ad-delayer refuses an oversized image with a 500. Reading that as
+    // transient had the caller retrying a hopeless job on every board load.
+    expect(terminalStatusFor(500, true)).toBe('FAILED');
+  });
+
+  it('stays transient when there is no status code at all', () => {
+    // A genuine network failure — no response, nothing to classify.
+    expect(terminalStatusFor(undefined)).toBeNull();
+    expect(terminalStatusFor('nope')).toBeNull();
+  });
+});
+
+describe('reading a Fal client error', () => {
+  const falError = Object.assign(new Error('Unprocessable Entity'), {
+    status: 422,
+    body: {
+      detail: [
+        {
+          loc: ['body', 'reference_image_urls', 0],
+          msg: 'Image dimensions are too small. Minimum dimensions are 256x256 pixels.',
+          type: 'value_error',
+        },
+      ],
+    },
+  });
+
+  it('finds the status and the detail body', () => {
+    expect(httpStatusOf(falError)).toBe(422);
+    expect(hasModelDetail(falError)).toBe(true);
+  });
+
+  it('maps it to FAILED and keeps the actionable line', () => {
+    expect(terminalStatusFor(httpStatusOf(falError), hasModelDetail(falError))).toBe('FAILED');
+    expect(describeFalError(falError)).toBe(
+      'reference_image_urls.0: Image dimensions are too small. Minimum dimensions are 256x256 pixels.',
+    );
+  });
+
+  it('reports nothing useful for a bare network error, and stays transient', () => {
+    const offline = new Error('Failed to fetch');
+    expect(httpStatusOf(offline)).toBeUndefined();
+    expect(hasModelDetail(offline)).toBe(false);
+    expect(terminalStatusFor(httpStatusOf(offline), hasModelDetail(offline))).toBeNull();
   });
 });

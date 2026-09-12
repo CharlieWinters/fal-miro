@@ -195,7 +195,7 @@ export async function run(payload: unknown, requestId = ''): Promise<RigResult> 
     return { requestId: falRequestId, embedItemId: firstEmbedId, outputUrl: primaryUrl };
   }
 
-  await replaceImageContent(placeholderId, makePlaceholderDataUrl(ratio, 'Failed'), `Fal · ${final.status}`, {
+  await replaceImageContent(placeholderId, makePlaceholderDataUrl(ratio, 'Failed', final.error), `Fal · ${final.status}`, {
     x: targetX,
     y: targetY,
   });
