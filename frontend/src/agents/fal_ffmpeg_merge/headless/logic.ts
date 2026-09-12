@@ -166,7 +166,7 @@ export async function run(payload: unknown, requestId = ''): Promise<FfmpegMerge
 
   await replaceImageContent(
     placeholderId,
-    makePlaceholderDataUrl(ratio, 'Failed'),
+    makePlaceholderDataUrl(ratio, 'Failed', final.error),
     `Fal · ${final.status}`,
     { x: targetX, y: targetY },
   );
