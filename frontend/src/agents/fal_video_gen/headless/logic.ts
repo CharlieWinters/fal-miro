@@ -27,7 +27,7 @@ import {
 } from '../../../shared/storage';
 import { estimateCostUSD, reportedInferenceSeconds } from '../../../shared/cost';
 import { bindVideoReferences, type Ref } from '../../../shared/referenceBinding';
-import { parseFalInputSchema, pickAspectRatioField } from '../../../shared/schema';
+import { parseFalInputSchema, pickAspectRatioField, requestedRatio } from '../../../shared/schema';
 import { broadcastUpdate } from '../../../headless/communications';
 import { POLL_BUDGET, pollStatus as sharedPollStatus, shouldLeaveForResume as isTimeout } from '../../../shared/pollStatus';
 
@@ -272,11 +272,21 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
   if (referenceFrameId) {
     const frame = await resolveAbsolutePosition(referenceFrameId);
     if (frame?.width && frame?.height) {
-      const snapped = snapFrameRatio(frame.width, frame.height);
-      if (snapped) {
+      // An explicit ratio in the request wins over the frame's shape. The
+      // frame is a layout container: this one is 2500x1400, which snaps to
+      // 16:9 within tolerance, and it was silently overriding settings cards
+      // that asked for 9:16 — the panel logged 9:16, the request carried
+      // 16:9, and every video came back landscape.
+      const asked = requestedRatio(finalInput);
+      const snapped = asked ? null : snapFrameRatio(frame.width, frame.height);
+      if (asked) {
+        // Placeholder follows the generation, not the frame, so the result is
+        // not letterboxed into a box of the wrong shape.
+        ratio = asked;
+      } else if (snapped) {
         ratio = snapped;
-        // Also feed the frame's shape into the actual generation request —
-        // otherwise Fal generates at whatever ratio the form had, and the
+        // Nothing was asked for, so feed the frame's shape into the request —
+        // otherwise Fal generates at whatever the form defaulted to, and the
         // mismatched result gets cropped to fit the frame-sized placeholder.
         try {
           const schemaRes = await api.getSchema(endpointId);
