@@ -189,6 +189,30 @@ export type RecipeSeed = {
   stickies: Array<{ content: string }>;
 };
 
+/**
+ * A reopened card's saved input, split the way a screen actually holds it.
+ *
+ * The prompt is not an ordinary form value on these screens: the prompt basket
+ * owns it, the schema form is told to hide the field, and the text lives in its
+ * own state. So restoring a card means writing to two places, and a screen that
+ * merged only into the form values dropped the prompt silently — the images
+ * came back, the words did not. That happened to references-to-video, while the
+ * other two screens each did it their own way. One function, so the next screen
+ * cannot forget.
+ *
+ * Connected stickies win over the card's frozen snapshot: they are what is
+ * wired to the card right now.
+ */
+export function seedFormState(
+  seed: Pick<RecipeSeed, 'input' | 'stickies'>,
+  fields: Field[],
+): { prompt: string | null; values: Record<string, unknown> } {
+  const values = { ...seed.input, ...resolveStickyFieldOverrides(seed.stickies, fields) };
+  const promptFieldName = pickPromptField(fields)?.name ?? 'prompt';
+  const prompt = values[promptFieldName];
+  return { prompt: typeof prompt === 'string' ? prompt : null, values };
+}
+
 /** A settings card found on the board, ready to reopen. */
 export type RecipeCardRef = {
   id: string;

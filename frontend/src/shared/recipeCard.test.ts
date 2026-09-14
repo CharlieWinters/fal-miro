@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 // `listRecipeCards` is imported dynamically in its own block: boardHelpers
 // caches board queries at module scope, so each test needs a fresh module.
-import { RECIPE_CARD_VERSION, parseRecipeCard, serializeRecipeCard, type RecipeCard } from './recipeCard';
+import {
+  RECIPE_CARD_VERSION,
+  parseRecipeCard,
+  seedFormState,
+  serializeRecipeCard,
+  type RecipeCard,
+} from './recipeCard';
+import type { Field } from './schema';
 
 const RECIPE: RecipeCard = {
   v: 1,
@@ -65,6 +72,53 @@ describe('parseRecipeCard', () => {
 
   it('round-trips through the version constant', () => {
     expect(RECIPE.v).toBe(RECIPE_CARD_VERSION);
+  });
+});
+
+describe('seedFormState', () => {
+  const promptField: Field = { name: 'prompt', label: 'Prompt', kind: 'text', required: true };
+  const durationField: Field = { name: 'duration', label: 'Duration', kind: 'number', required: false };
+  const seed = (input: Record<string, unknown>, stickies: Array<{ content: string }> = []) => ({
+    input,
+    stickies,
+  });
+
+  it('lifts the prompt out of the saved input so it can reach its own state', () => {
+    // The bug this exists for: references-to-video merged the input into the
+    // form only, and the form hides the prompt field, so the words vanished.
+    const { prompt, values } = seedFormState(
+      seed({ prompt: 'Image 1 is the framing to hold.', duration: 3 }),
+      [promptField, durationField],
+    );
+    expect(prompt).toBe('Image 1 is the framing to hold.');
+    expect(values).toEqual({ prompt: 'Image 1 is the framing to hold.', duration: 3 });
+  });
+
+  it('follows the schema when the model calls its prompt something else', () => {
+    const textField: Field = { name: 'text', label: 'Text', kind: 'text', required: true };
+    const { prompt } = seedFormState(seed({ text: 'read this aloud' }), [textField]);
+    expect(prompt).toBe('read this aloud');
+  });
+
+  it('lets a connected sticky beat the card’s frozen snapshot', () => {
+    const { prompt, values } = seedFormState(
+      seed({ prompt: 'what the card saved', duration: 3 }, [{ content: 'Prompt: what is wired up now' }]),
+      [promptField, durationField],
+    );
+    expect(prompt).toBe('what is wired up now');
+    expect(values.duration).toBe(3);
+  });
+
+  it('reports no prompt rather than a wrong one', () => {
+    expect(seedFormState(seed({ duration: 3 }), [promptField]).prompt).toBeNull();
+    expect(seedFormState(seed({ prompt: 42 }), [promptField]).prompt).toBeNull();
+    expect(seedFormState(seed({}), []).prompt).toBeNull();
+  });
+
+  it('still finds a prompt when the schema has not loaded any fields', () => {
+    // Schema fetch failed and the screen fell back: the field list is empty,
+    // but the card's own prompt should still come back.
+    expect(seedFormState(seed({ prompt: 'from the card' }), []).prompt).toBe('from the card');
   });
 });
 

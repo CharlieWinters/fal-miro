@@ -15,7 +15,7 @@ import {
 } from '../../shared/boardHelpers';
 import {
   RECIPE_CARD_VERSION,
-  resolveStickyFieldOverrides,
+  seedFormState,
   serializeRecipeCard,
   type RecipeCard,
   type RecipeSeed,
@@ -123,9 +123,8 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
   // since they reflect what's connected right now.
   useEffect(() => {
     if (!seed || schema.status === 'loading') return;
-    const overrides = resolveStickyFieldOverrides(seed.stickies, fields);
-    const merged = { ...seed.input, ...overrides } as Record<string, unknown>;
-    if (typeof merged.prompt === 'string') setPromptText(merged.prompt);
+    const { prompt: seedPrompt, values: merged } = seedFormState(seed, fields);
+    if (seedPrompt !== null) setPromptText(seedPrompt);
     setValues((v) => ({ ...v, ...merged }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.token, schema.status]);

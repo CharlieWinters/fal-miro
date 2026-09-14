@@ -30,7 +30,7 @@ import {
 } from '../../shared/boardHelpers';
 import {
   RECIPE_CARD_VERSION,
-  resolveStickyFieldOverrides,
+  seedFormState,
   serializeRecipeCard,
   type RecipeCard,
   type RecipeSeed,
@@ -146,10 +146,16 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.token]);
 
+  // Restore the card's saved input. The prompt has to be written to its own
+  // state, not just into `values` — the prompt basket owns that field and the
+  // schema form is told to hide it, so a prompt left in `values` is dropped on
+  // the floor. That is exactly what used to happen here: the references came
+  // back, the words did not.
   useEffect(() => {
     if (!seed || schema.status === 'loading') return;
-    const overrides = resolveStickyFieldOverrides(seed.stickies, fields);
-    setValues((v) => ({ ...v, ...seed.input, ...overrides }));
+    const { prompt: seedPrompt, values: merged } = seedFormState(seed, fields);
+    if (seedPrompt !== null) setPromptText(seedPrompt);
+    setValues((v) => ({ ...v, ...merged }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.token, schema.status]);
 
