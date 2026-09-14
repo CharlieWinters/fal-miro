@@ -9,7 +9,7 @@
 // that round trip to disturb, regardless of how Miro wraps it.
 
 import type { Capability } from './falCatalog';
-import type { ResolvedBoardItems } from './boardHelpers';
+import { cachedBoardGet, type ResolvedBoardItems } from './boardHelpers';
 import { pickPromptField, type Field } from './schema';
 
 export const RECIPE_CARD_VERSION = 1;
@@ -36,12 +36,38 @@ export function serializeRecipeCard(recipe: RecipeCard): string {
   return JSON.stringify(recipe);
 }
 
+/**
+ * Miro keeps a Card description as HTML, which does two things to the JSON.
+ *
+ * It may wrap the value in a tag, and it escapes the JSON's own quotes into
+ * entities: `{"v":1}` comes back as `{&#34;v&#34;:1}`. Stripping tags alone
+ * leaves the entities, and `JSON.parse` cannot read those — so every card
+ * whose description was read back from the board, rather than held in memory
+ * from the moment it was written, failed to parse and simply stopped being
+ * recognised as a settings card. Cards made outside the app never worked at
+ * all, since their description is always read back from storage.
+ *
+ * Tags are stripped *before* entities are decoded, so an escaped `&lt;` inside
+ * a prompt survives instead of being read as markup and deleted.
+ *
+ * DOMParser rather than an innerHTML round trip: it is inert, so nothing in a
+ * board description can fetch a resource while we are only after its text.
+ */
+function decodeCardDescription(description: string): string {
+  const withoutTags = description.replace(/<[^>]+>/g, '');
+  try {
+    const doc = new DOMParser().parseFromString(withoutTags, 'text/html');
+    return (doc.documentElement.textContent ?? withoutTags).trim();
+  } catch {
+    return withoutTags.trim();
+  }
+}
+
 /** Parse a Card's description back into a RecipeCard, or null if it isn't one. */
 export function parseRecipeCard(description: string | undefined | null): RecipeCard | null {
   if (!description) return null;
   try {
-    const text = description.replace(/<[^>]+>/g, '').trim();
-    const v = JSON.parse(text);
+    const v = JSON.parse(decodeCardDescription(description));
     if (v && typeof v === 'object' && v.v === RECIPE_CARD_VERSION && typeof v.endpointId === 'string') {
       return v as RecipeCard;
     }
@@ -162,6 +188,46 @@ export type RecipeSeed = {
    *  screen knows the model's fields (see `resolveStickyFieldOverrides`). */
   stickies: Array<{ content: string }>;
 };
+
+/** A settings card found on the board, ready to reopen. */
+export type RecipeCardRef = {
+  id: string;
+  title?: string;
+  recipe: RecipeCard;
+};
+
+/**
+ * Every settings card on the board, newest last (board order).
+ *
+ * The selection-driven route needs the user to know that selecting a Card is
+ * what surfaces the reopen tile, and it silently offers nothing when a
+ * description does not parse. This is the direct route: one board query,
+ * on demand, no selection involved and no listener kept open.
+ *
+ * `cachedBoardGet` means repeated scans within a couple of seconds cost one
+ * SDK call, not several.
+ */
+export async function listRecipeCards(): Promise<RecipeCardRef[]> {
+  const cards = (await cachedBoardGet('card')) as Array<{
+    id?: string;
+    title?: string;
+    description?: string;
+  }>;
+  const out: RecipeCardRef[] = [];
+  for (const card of cards) {
+    if (!card?.id) continue;
+    const recipe = parseRecipeCard(card.description);
+    if (!recipe) continue;
+    out.push({ id: card.id, title: stripCardTitle(card.title), recipe });
+  }
+  return out;
+}
+
+/** Card titles come back as HTML too, and are shown as plain text. */
+function stripCardTitle(title: string | undefined): string | undefined {
+  if (!title) return undefined;
+  return decodeCardDescription(title) || undefined;
+}
 
 let nextSeedToken = 1;
 

@@ -29,7 +29,7 @@ import {
 import { setSceneInputs } from '../../shared/storage';
 import { toneOf, toneFill, toneOutline } from '../../shared/capabilityTone';
 import { CapabilityIcon } from '../CapabilityIcon';
-import { parseRecipeCard, type RecipeCard } from '../../shared/recipeCard';
+import { listRecipeCards, parseRecipeCard, type RecipeCard, type RecipeCardRef } from '../../shared/recipeCard';
 import { applyMotionToCharacter, pickMotionAndRig } from '../applyMotion';
 
 /** "→ Image" capture utilities that open in the modal for a large view. */
@@ -66,6 +66,12 @@ type Drill = { type: 'category'; value: string } | { type: 'provider'; value: st
 
 /** Which Browse tab is showing. Lives in App, not here — see HomeScreen's props. */
 export type BrowseMode = 'category' | 'provider' | 'apps';
+
+/** The catalog's label for an endpoint, or a readable form of the id when the
+ *  catalog hasn't synced it (a long-tail or retired model). */
+function modelLabelFor(endpointId: string): string {
+  return findModel(endpointId)?.label ?? endpointId.replace(/^fal-ai\//, '');
+}
 
 /** A "For your selection" capture-tool card — icon is its capability, in a
  *  tone-tinted chip (matching the design's context tools). */
@@ -223,9 +229,26 @@ export function HomeScreen({
   // a recipe (see recipeCard.ts) offers to jump back into its model screen.
   const selectedCard = useFirstSelected<{ id: string; description?: string }>('card');
   const selectedRecipe = useMemo(() => parseRecipeCard(selectedCard?.description), [selectedCard]);
-  const recipeModelLabel = selectedRecipe
-    ? findModel(selectedRecipe.endpointId)?.label ?? selectedRecipe.endpointId.replace(/^fal-ai\//, '')
-    : '';
+  const recipeModelLabel = selectedRecipe ? modelLabelFor(selectedRecipe.endpointId) : '';
+
+  // Browse ▸ "Settings cards": the reopen route that does not depend on having
+  // the right item selected. One board query per click, nothing kept open.
+  const [boardRecipes, setBoardRecipes] = useState<RecipeCardRef[] | null>(null);
+  const [scanningRecipes, setScanningRecipes] = useState(false);
+  const [recipeScanError, setRecipeScanError] = useState<string | null>(null);
+
+  const scanRecipeCards = async () => {
+    setScanningRecipes(true);
+    setRecipeScanError(null);
+    try {
+      setBoardRecipes(await listRecipeCards());
+    } catch (e) {
+      setBoardRecipes(null);
+      setRecipeScanError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setScanningRecipes(false);
+    }
+  };
 
   const selectedEmbeds = useSelectedItems<{ id: string; url?: string; title?: string }>('embed');
   // Scene Builder also loads its assets through /proxy — same mothballing rule.
@@ -440,6 +463,37 @@ export function HomeScreen({
               Apps
             </button>
           </div>
+
+          {/* Settings cards on this board. The other way in is selecting the
+              card itself, which only helps if you already know that is the
+              gesture — and says nothing when a card turns out not to hold a
+              recipe. This asks the board directly, on demand. */}
+          <button type="button" className="secondary" onClick={scanRecipeCards} disabled={scanningRecipes}>
+            {scanningRecipes ? 'Looking…' : 'Find settings cards'}
+          </button>
+          {recipeScanError && <div className="notice">Couldn’t read the board: {recipeScanError}</div>}
+          {boardRecipes && (
+            <div className="sel-zone">
+              <span className="eyebrow">
+                {boardRecipes.length ? `Settings cards · ${boardRecipes.length}` : 'Settings cards'}
+              </span>
+              {boardRecipes.length === 0 && (
+                <div className="hint">
+                  None on this board. Save one from a model screen, or write a card whose description is the
+                  recipe JSON.
+                </div>
+              )}
+              {boardRecipes.map((c) => (
+                <ToolCard
+                  key={c.id}
+                  capability={c.recipe.capability}
+                  title={c.title || `Reopen · ${modelLabelFor(c.recipe.endpointId)}`}
+                  sub={modelLabelFor(c.recipe.endpointId)}
+                  onOpen={() => onOpenRecipe(c.recipe, c.id)}
+                />
+              ))}
+            </div>
+          )}
 
           <div className="tiles">
             {browseMode === 'category' &&
