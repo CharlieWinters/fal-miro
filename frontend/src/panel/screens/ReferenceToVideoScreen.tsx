@@ -200,6 +200,29 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
   const dialect = useMemo(() => videoReferenceDialect(model.endpointId), [model.endpointId]);
 
   /**
+   * The frame-shaping arguments exactly as they will be sent.
+   *
+   * Worth showing, because getting this wrong is silent and expensive. A
+   * settings card can say 9:16 while the form still holds the schema default,
+   * and the only evidence is a landscape video several minutes and several
+   * cents later. `aspect_ratio` defaults to `adaptive` on MiniMax H3, which
+   * means "take the frame from the reference images" — and reference plates are
+   * usually landscape, so adaptive quietly produces a landscape shot whatever
+   * the card says.
+   */
+  const framing = useMemo(() => {
+    const sending = buildInput(fields, values, referenceFieldNames);
+    const aspect = typeof sending.aspect_ratio === 'string' ? sending.aspect_ratio : null;
+    return {
+      aspect,
+      resolution: typeof sending.resolution === 'string' ? sending.resolution : null,
+      duration: typeof sending.duration === 'number' ? `${sending.duration}s` : null,
+      /** Adaptive (or absent) with references attached is the trap. */
+      inheritsFromReferences: (aspect === null || aspect === 'adaptive') && images.length > 0,
+    };
+  }, [fields, values, referenceFieldNames, images.length]);
+
+  /**
    * Why Generate can't run yet, or null — drives both the disabled button and
    * the message. Same shape as the other two screens.
    */
@@ -208,7 +231,12 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
     // panel happily sent references under Seedance's names to models that use
     // different ones, and the only symptom was a rejection from Fal minutes
     // later saying no references had been provided.
-    if (schema.status !== 'loading' && referenceFieldNames.length === 0) {
+    // Nothing correct can be assembled before the schema is known: buildInput
+    // reads the field list, and a reopened card's settings are merged in on the
+    // same tick the schema lands. Generating first sends the defaults with none
+    // of the card's values — right prompt, wrong frame, real money.
+    if (schema.status === 'loading') return 'Reading the model’s inputs…';
+    if (referenceFieldNames.length === 0) {
       return 'This model declares no reference field the panel recognises — use the generic model form for it.';
     }
     if (imageBasket.hasMissing) return 'An image in the basket is no longer on the board — remove it first.';
@@ -391,6 +419,12 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
                   <span className="k">Prompt</span>
                   <span className="v">{bound.prompt.trim() || '—'}</span>
                 </div>
+                <div>
+                  <span className="k">Frame</span>
+                  <span className="v">
+                    {[framing.aspect, framing.resolution, framing.duration].filter(Boolean).join(' · ') || '—'}
+                  </span>
+                </div>
                 <div className="preview-note">
                   {dialect === 'none' ? (
                     <>
@@ -414,6 +448,14 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
                 </div>
               </div>
             </details>
+          )}
+
+          {framing.inheritsFromReferences && (
+            <div className="notice">
+              Aspect ratio is <b>{framing.aspect ?? 'unset'}</b>, which lets the model take the frame from your
+              references. Reference plates are usually landscape, so the video comes back landscape whatever a
+              settings card says. Pick 9:16 in the form for a portrait shot.
+            </div>
           )}
 
           <div className="button-row">
