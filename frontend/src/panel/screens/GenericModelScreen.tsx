@@ -5,7 +5,7 @@ import { api } from '../../lib/api';
 import { connectItemsToCard, createCardBelow, resolveBoardItems } from '../../shared/boardHelpers';
 import {
   RECIPE_CARD_VERSION,
-  resolveStickyFieldOverrides,
+  seedFormState,
   serializeRecipeCard,
   type RecipeCard,
   type RecipeSeed,
@@ -109,11 +109,8 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
   // 42" or "Prompt: …" sticky) — those win over the frozen input snapshot.
   useEffect(() => {
     if (!seed || schema.status === 'loading') return;
-    const overrides = resolveStickyFieldOverrides(seed.stickies, fields);
-    const merged = { ...seed.input, ...overrides } as Record<string, unknown>;
-    if (promptField && typeof merged[promptField.name] === 'string') {
-      setPromptText(merged[promptField.name] as string);
-    }
+    const { prompt: seedPrompt, values: merged } = seedFormState(seed, fields);
+    if (seedPrompt !== null) setPromptText(seedPrompt);
     setValues((v) => ({ ...v, ...merged }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.token, schema.status]);

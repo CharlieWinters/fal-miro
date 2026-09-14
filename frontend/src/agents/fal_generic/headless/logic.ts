@@ -10,7 +10,6 @@ import {
   resolveAbsolutePosition,
   resolveBelowFrameBox,
   resolvePlaceholderAnchor,
-  snapFrameRatio,
 } from '../../../shared/boardHelpers';
 import { describeFalError } from '../../../shared/falError';
 import {
@@ -21,7 +20,6 @@ import {
 } from '../../../shared/storage';
 import { placeGenericOutput, type OutputKind } from '../../../shared/genericOutput';
 import { estimateCostUSD, reportedInferenceSeconds } from '../../../shared/cost';
-import { parseFalInputSchema, pickAspectRatioField } from '../../../shared/schema';
 import { broadcastUpdate } from '../../../headless/communications';
 import { POLL_BUDGET, pollStatus as sharedPollStatus, shouldLeaveForResume as isTimeout } from '../../../shared/pollStatus';
 
@@ -51,8 +49,8 @@ export type GenericGenPayload = {
   cardAnchorId?: string;
   /** The frame the references were collected from, if any — takes placement
    *  priority over `cardAnchorId`: the output goes directly below this frame,
-   *  sized to match its width (ratio snapped to the frame's own shape when
-   *  it's close to a logical one, see `snapFrameRatio`). */
+   *  sized to match its width. Placement only — the frame's own shape never
+   *  changes the ratio the generation is requested at. */
   referenceFrameId?: string;
 };
 
@@ -121,27 +119,16 @@ export async function run(payload: unknown, requestId = ''): Promise<GenericGenR
   if (!ratio) ratio = '1:1';
 
   // If the references came from a frame, that frame takes placement priority:
-  // the output goes directly below it, sized to match its width, ratio
-  // snapped to the frame's own shape when that's close to a logical one.
+  // the output goes directly below it, sized to match its width.
   let placementBox: { x: number; y: number; width: number; height: number } | null = null;
   if (referenceFrameId) {
     const frame = await resolveAbsolutePosition(referenceFrameId);
     if (frame?.width && frame?.height) {
-      const snapped = snapFrameRatio(frame.width, frame.height);
-      if (snapped) {
-        ratio = snapped;
-        // Also feed the frame's shape into the actual generation request —
-        // otherwise Fal generates at whatever ratio the form had, and the
-        // mismatched result gets cropped to fit the frame-sized placeholder.
-        try {
-          const schemaRes = await api.getSchema(endpointId);
-          const aspectField = pickAspectRatioField(parseFalInputSchema(schemaRes.openapi));
-          const value = aspectField?.valueForRatio(snapped);
-          if (aspectField && value) finalInput[aspectField.name] = value;
-        } catch (e) {
-          console.warn('[fal_generic] aspect-ratio override failed', e);
-        }
-      }
+      // The frame decides WHERE the output goes and how wide it is, never what
+      // shape it is generated at. A frame is a layout container: the storyboard
+      // frames are 2500x1400, which lands within 0.5% of 16:9, and letting that
+      // drive the request silently overrode settings cards asking for 9:16.
+      // The ratio stays whatever the request asked for.
       placementBox = await resolveBelowFrameBox(referenceFrameId, ratio);
     }
   }
