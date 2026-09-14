@@ -366,29 +366,6 @@ const IMAGE_SIZE_RATIOS: Record<string, string> = {
   portrait_16_9: '9:16',
 };
 
-/**
- * The frame shape this request already asks for, as "W:H", or null when it
- * leaves the choice open.
- *
- * "Open" means either no aspect field at all, or a value that hands the
- * decision to the model: MiniMax's `adaptive`, anyone's `auto`. Those are the
- * only cases where a *frame's* shape should be allowed to decide the output's
- * ratio. An explicit request — from the form, or from a settings card that
- * says 9:16 — is an instruction, and a layout frame that happens to be drawn
- * 2500x1400 is not.
- *
- * This existed as the missing half of `pickAspectRatioField`: the agents used
- * that to push a frame-derived ratio into the request without ever asking
- * whether the request had already said something.
- */
-export function requestedRatio(input: Record<string, unknown>): string | null {
-  const ratio = input.aspect_ratio;
-  if (typeof ratio === 'string' && /^\d+:\d+$/.test(ratio.trim())) return ratio.trim();
-  const size = input.image_size;
-  if (typeof size === 'string' && IMAGE_SIZE_RATIOS[size]) return IMAGE_SIZE_RATIOS[size];
-  return null;
-}
-
 export type AspectRatioField = {
   name: string;
   /** The field's own value for a given "W:H" ratio, or null if this field

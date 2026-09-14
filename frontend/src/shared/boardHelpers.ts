@@ -615,11 +615,14 @@ const KNOWN_RATIOS: Array<{ ratio: string; value: number }> = ['21:9', '16:9', '
 );
 
 /**
- * Snap a frame's own width/height to the nearest logical aspect ratio (16:9,
- * 9:16, 1:1, …) if it's within `tolerance` (4% by default) — lets a frame
- * shaped roughly like a target video/image format drive the output's ratio
- * automatically. Returns null for an oddly-shaped grouping frame, so the
- * caller falls back to its own ratio logic.
+ * Snap an item's width/height to the nearest logical aspect ratio (16:9,
+ * 9:16, 1:1, …) if it's within `tolerance` (4% by default), else null.
+ *
+ * Only for a shape a caller has been told to match: a pipeline step naming the
+ * item its output should look like (`ratioFromItemId`). It used to be applied
+ * to any frame a generation's references happened to sit in, which meant a
+ * storyboard frame drawn 2500x1400 (0.5% off 16:9) silently overrode settings
+ * cards asking for 9:16. A layout frame is not a request for a shape.
  */
 export function snapFrameRatio(width: number, height: number, tolerance = 0.04): string | null {
   if (!width || !height) return null;

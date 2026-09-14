@@ -16,7 +16,6 @@ import {
   resolveAbsolutePosition,
   resolveBelowFrameBox,
   resolvePlaceholderAnchor,
-  snapFrameRatio,
 } from '../../../shared/boardHelpers';
 import { describeFalError } from '../../../shared/falError';
 import {
@@ -27,7 +26,6 @@ import {
 } from '../../../shared/storage';
 import { estimateCostUSD, reportedInferenceSeconds } from '../../../shared/cost';
 import { bindVideoReferences, type Ref } from '../../../shared/referenceBinding';
-import { parseFalInputSchema, pickAspectRatioField, requestedRatio } from '../../../shared/schema';
 import { broadcastUpdate } from '../../../headless/communications';
 import { POLL_BUDGET, pollStatus as sharedPollStatus, shouldLeaveForResume as isTimeout } from '../../../shared/pollStatus';
 
@@ -82,8 +80,8 @@ export type VideoGenPayload = {
   cardAnchorId?: string;
   /** The frame the references were collected from, if any — takes placement
    *  priority over `cardAnchorId`: the output goes directly below this frame,
-   *  sized to match its width (ratio snapped to the frame's own shape when
-   *  it's close to a logical one, see `snapFrameRatio`). */
+   *  sized to match its width. Placement only — the frame's own shape never
+   *  changes the ratio the generation is requested at. */
   referenceFrameId?: string;
 };
 
@@ -266,37 +264,16 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
   if (!ratio) ratio = '16:9';
 
   // If the references came from a frame, that frame takes placement priority:
-  // the output goes directly below it, sized to match its width, ratio
-  // snapped to the frame's own shape when that's close to a logical one.
+  // the output goes directly below it, sized to match its width.
   let placementBox: { x: number; y: number; width: number; height: number } | null = null;
   if (referenceFrameId) {
     const frame = await resolveAbsolutePosition(referenceFrameId);
     if (frame?.width && frame?.height) {
-      // An explicit ratio in the request wins over the frame's shape. The
-      // frame is a layout container: this one is 2500x1400, which snaps to
-      // 16:9 within tolerance, and it was silently overriding settings cards
-      // that asked for 9:16 — the panel logged 9:16, the request carried
-      // 16:9, and every video came back landscape.
-      const asked = requestedRatio(finalInput);
-      const snapped = asked ? null : snapFrameRatio(frame.width, frame.height);
-      if (asked) {
-        // Placeholder follows the generation, not the frame, so the result is
-        // not letterboxed into a box of the wrong shape.
-        ratio = asked;
-      } else if (snapped) {
-        ratio = snapped;
-        // Nothing was asked for, so feed the frame's shape into the request —
-        // otherwise Fal generates at whatever the form defaulted to, and the
-        // mismatched result gets cropped to fit the frame-sized placeholder.
-        try {
-          const schemaRes = await api.getSchema(endpointId);
-          const aspectField = pickAspectRatioField(parseFalInputSchema(schemaRes.openapi));
-          const value = aspectField?.valueForRatio(snapped);
-          if (aspectField && value) finalInput[aspectField.name] = value;
-        } catch (e) {
-          console.warn('[fal_video_gen] aspect-ratio override failed', e);
-        }
-      }
+      // The frame decides WHERE the output goes and how wide it is, never what
+      // shape it is generated at. A frame is a layout container: the storyboard
+      // frames are 2500x1400, which lands within 0.5% of 16:9, and letting that
+      // drive the request silently overrode settings cards asking for 9:16.
+      // The ratio stays whatever the request asked for.
       placementBox = await resolveBelowFrameBox(referenceFrameId, ratio);
     }
   }
