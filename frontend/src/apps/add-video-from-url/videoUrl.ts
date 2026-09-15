@@ -82,7 +82,13 @@ export function archiveMetadataUrl(identifier: string): string {
   return `https://archive.org/metadata/${encodeURIComponent(identifier)}`;
 }
 
-export type ArchiveFile = { name?: unknown; format?: unknown; size?: unknown };
+export type ArchiveFile = {
+  name?: unknown;
+  format?: unknown;
+  size?: unknown;
+  width?: unknown;
+  height?: unknown;
+};
 export type ArchiveMetadata = { files?: unknown };
 
 export type ArchiveVideoPick = {
@@ -90,12 +96,40 @@ export type ArchiveVideoPick = {
   name: string;
   bytes: number | null;
   format: string | null;
+  width: number | null;
+  height: number | null;
+  /** True when nothing in the item clears MIN_VIDEO_DIMENSION, so this pick is
+   *  the best of a bad set and Fal will reject it as a model input. */
+  belowMinimum: boolean;
 };
 
-/** `size` arrives as a decimal string on most files and is absent on some. */
-function fileBytes(raw: unknown): number | null {
+/**
+ * Fal's floor for video inputs: models reject anything under this on either
+ * axis with a `video_too_small` error. Archive.org's ubiquitous `_512kb.mp4`
+ * derivative is 320x240, which fails on height — hence this whole rule.
+ */
+export const MIN_VIDEO_DIMENSION = 300;
+
+/** `size`, `width` and `height` all arrive as decimal strings on most files,
+ *  and are absent on some. */
+function numberField(raw: unknown): number | null {
   const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN;
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * How widely a container plays, lower being better. Size is the tie-break, not
+ * the first sort: archive.org pairs a 640x480 h.264 .mp4 with a smaller
+ * 400x304 .ogv, and both clear Fal's minimum — but Safari plays no Ogg at all,
+ * so choosing the smaller file there produces an embed that is simply blank
+ * for every Safari viewer on the board. A quarter more bytes is the cheaper
+ * price.
+ */
+function containerRank(name: string): number {
+  const n = name.toLowerCase();
+  if (n.endsWith('.mp4') || n.endsWith('.m4v')) return 0;
+  if (n.endsWith('.mov') || n.endsWith('.webm')) return 1;
+  return 2; // .ogv / .ogg — no Safari support
 }
 
 /** Encode per path segment — a file name may contain slashes (derivative
@@ -108,11 +142,14 @@ function downloadUrl(identifier: string, name: string): string {
 /**
  * Choose the file to actually play from an item's metadata.
  *
- * Smallest playable file wins. Archive.org items typically carry a huge
- * preservation master alongside a small derivative of the same content (a
- * 1.6 GB MPEG4 next to a 55 MB h.264), and for previewing on a board — and
- * for handing to a model — the derivative is the one you want. Anyone who
- * needs the master can paste its download URL directly.
+ * The smallest playable file that still clears Fal's minimum dimensions.
+ * Archive.org items typically carry a huge preservation master alongside
+ * small derivatives of the same content, so size alone is a good first
+ * instinct — but the most common derivative, `_512kb.mp4`, is 320x240, and
+ * Fal rejects any video input under 300 on either axis. Picking purely by
+ * size hands back a clip that plays fine on the board and cannot be fed to a
+ * model. Dimensions come from the item metadata, so this costs no extra
+ * request. Anyone who wants a specific file can paste its download URL.
  */
 export function pickArchiveVideo(
   identifier: string,
@@ -123,7 +160,9 @@ export function pickArchiveVideo(
     .map((f) => ({
       name: typeof f.name === 'string' ? f.name : '',
       format: typeof f.format === 'string' ? f.format : null,
-      bytes: fileBytes(f.size),
+      bytes: numberField(f.size),
+      width: numberField(f.width),
+      height: numberField(f.height),
     }))
     .filter((f) => f.name && PLAYABLE_EXTENSIONS.some((ext) => f.name.toLowerCase().endsWith(ext)));
 
@@ -133,13 +172,45 @@ export function pickArchiveVideo(
 
   // Unsized files sort last: an unknown size can't be compared, and every item
   // that has a derivative reports its size.
-  const best = candidates.sort((a, b) => (a.bytes ?? Infinity) - (b.bytes ?? Infinity))[0];
+  const bySize = [...candidates].sort(
+    (a, b) => containerRank(a.name) - containerRank(b.name) || (a.bytes ?? Infinity) - (b.bytes ?? Infinity),
+  );
+  const measured = candidates.filter((f) => f.width !== null && f.height !== null);
+  const bigEnough = bySize.filter(
+    (f) =>
+      f.width !== null &&
+      f.height !== null &&
+      f.width >= MIN_VIDEO_DIMENSION &&
+      f.height >= MIN_VIDEO_DIMENSION,
+  );
+
+  // Smallest that is big enough, not simply smallest. Both matter and they
+  // pull against each other: a board wants the light file, but Fal rejects
+  // anything under 300 on either axis, and these items routinely pair a
+  // 320x240 `_512kb.mp4` with a 640x480 h.264 only slightly larger. Taking the
+  // smaller one there costs nothing on the board and makes the clip unusable
+  // as a model input, which is the worse trade.
+  let best = bigEnough[0];
+  let belowMinimum = false;
+
+  if (!best && measured.length) {
+    // Everything measured is too small — take the largest and let the caller
+    // warn, rather than silently handing back the very smallest.
+    best = [...measured].sort((a, b) => b.width! * b.height! - a.width! * a.height!)[0];
+    belowMinimum = true;
+  }
+  // No dimensions published at all: fall back to smallest, and claim nothing
+  // about whether it will pass.
+  if (!best) best = bySize[0];
 
   return {
     url: downloadUrl(identifier, best.name),
     name: best.name,
     bytes: best.bytes,
     format: best.format,
+    width: best.width,
+    height: best.height,
+    belowMinimum,
   };
 }
 
