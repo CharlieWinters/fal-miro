@@ -50,6 +50,10 @@ export const POLL_BUDGET = {
   motion: { intervalMs: 4000, timeoutMs: 15 * 60 * 1000 },
   // Segmentation + OCR + font matching over one image: a minute or two.
   layers: { intervalMs: 4000, timeoutMs: 15 * 60 * 1000 },
+  // A video embed's poster frame. Deliberately impatient: the video is
+  // already generated and the embed is waiting on this, so a slow extract
+  // loses its thumbnail rather than delaying the result on the board.
+  poster: { intervalMs: 1000, timeoutMs: 20 * 1000 },
   // Anything at all can come through the generic screen, video and 3D
   // included, so it gets the longest ordinary budget rather than the shortest.
   generic: { intervalMs: 4000, timeoutMs: 20 * 60 * 1000 },

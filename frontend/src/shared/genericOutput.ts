@@ -7,6 +7,7 @@
 // embed. Shared so fal_generic and resume_jobs stay in lockstep.
 
 import { audioEmbedUrl, videoEmbedUrl, model3dEmbedUrl, motionEmbedUrl } from '../lib/api';
+import { resolveVideoPoster } from './videoPoster';
 import {
   createEmbedAtPosition,
   deleteItem,
@@ -72,6 +73,15 @@ export async function placeGenericOutput(opts: {
         : kind === 'audio'
           ? audioEmbedUrl(url)
           : url;
-  const embed = await createEmbedAtPosition({ url: embedUrl, x, y, width, height });
+  const embed = await createEmbedAtPosition({
+    url: embedUrl,
+    x,
+    y,
+    width,
+    height,
+    // Only video carries a frame worth showing; the 3D, motion and audio pages
+    // render their own thing and a still of frame zero would say nothing.
+    ...(kind === 'video' ? { previewUrl: await resolveVideoPoster(url) } : {}),
+  });
   return { itemId: embed.id, kind };
 }

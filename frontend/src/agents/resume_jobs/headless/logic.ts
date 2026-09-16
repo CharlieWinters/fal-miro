@@ -1,6 +1,7 @@
 import { api, videoEmbedUrl, model3dEmbedUrl, panoramaEmbedUrl, rigEmbedUrl, motionEmbedUrl, type StatusResponse } from '../../../lib/api';
 import { POLL_BUDGET, isTerminal, isUnreachable, pollStatus, shouldLeaveForResume } from '../../../shared/pollStatus';
 import { describeGiveUp, giveUpReason } from '../../../shared/jobRetry';
+import { resolveVideoPoster } from '../../../shared/videoPoster';
 import {
   createEmbedAtPosition,
   deleteItem,
@@ -225,7 +226,14 @@ async function finalize(job: ActiveJob, s: StatusResponse): Promise<void> {
             : job.kind === 'motion'
               ? motionEmbedUrl(outputUrl)
               : videoEmbedUrl(outputUrl);
-      const embed = await createEmbedAtPosition({ url: embedUrl, x, y, width, height });
+      const embed = await createEmbedAtPosition({
+        url: embedUrl,
+        x,
+        y,
+        width,
+        height,
+        ...(job.kind === 'video' ? { previewUrl: await resolveVideoPoster(outputUrl) } : {}),
+      });
       const settings = { ...job.settings };
       // Backfill cost if the live agent never got to stamp it (e.g. the job
       // timed out and finished in the background). Time-billed models bill on

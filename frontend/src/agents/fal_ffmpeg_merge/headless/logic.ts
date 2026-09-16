@@ -10,6 +10,7 @@ import {
   resolveAbsolutePosition,
 } from '../../../shared/boardHelpers';
 import { describeFalError } from '../../../shared/falError';
+import { resolveVideoPoster } from '../../../shared/videoPoster';
 import {
   addActiveJob,
   removeActiveJob,
@@ -157,6 +158,7 @@ export async function run(payload: unknown, requestId = ''): Promise<FfmpegMerge
       y: embedY,
       width,
       height,
+      previewUrl: await resolveVideoPoster(outputUrl),
     });
     settings.costUSD = await estimateCostUSD(endpointId, { units: 1 });
     await setItemGenerationSettings(embed.id, settings);
