@@ -1,6 +1,5 @@
 import { api, videoEmbedUrl, type StatusResponse } from '../../../lib/api';
 import {
-  asPreviewUrl,
   createEmbedAtPosition,
   createImageAtAbsolute,
   createImageBelow,
@@ -18,6 +17,7 @@ import {
   resolvePlaceholderAnchor,
 } from '../../../shared/boardHelpers';
 import { describeFalError } from '../../../shared/falError';
+import { resolveVideoPoster } from '../../../shared/videoPoster';
 import {
   addActiveJob,
   removeActiveJob,
@@ -399,7 +399,7 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
       y: embedY,
       width,
       height,
-      previewUrl: asPreviewUrl(sourceUrl),
+      previewUrl: await resolveVideoPoster(outputUrl, sourceUrl),
     });
     // Bill by elapsed compute time: Fal's reported inference time if present,
     // else the wall-clock run time we measured, else the requested duration.
