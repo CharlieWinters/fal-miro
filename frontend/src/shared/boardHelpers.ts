@@ -362,14 +362,45 @@ export async function getFrameCardResources(cardId: string): Promise<ResolvedBoa
   return expandFrameChildren([parentId]);
 }
 
-/** Everything connected to a board item — e.g. a settings card — via
- *  connector lines (frame-aware, see `resolveBoardItems`) union'd with
- *  whatever else shares its parent frame, if any (see `getFrameCardResources`). */
+/**
+ * Per modality, an explicitly wired set wins outright; frame membership only
+ * fills a modality nobody wired.
+ *
+ * This used to be a union, and a union cannot express an exclusion. Re-point
+ * the "Image 1" line at a different picture and the old one is still sitting
+ * in the frame, so it came back anyway — as an extra reference on the end
+ * rather than the one you replaced. With two near-identical references of the
+ * same subject, which one the model follows is a coin toss, and it reads as
+ * the app ignoring the line you just moved.
+ *
+ * Precedence is per modality on purpose. Wiring only the prompt sticky and
+ * leaving the images to frame membership is a reasonable way to work, and an
+ * all-or-nothing rule would silently drop every image the moment one line
+ * existed.
+ */
+export function preferWired(
+  wired: ResolvedBoardItems,
+  fromFrame: ResolvedBoardItems,
+): ResolvedBoardItems {
+  const pick = <T,>(explicit: T[], implicit: T[]): T[] => (explicit.length ? explicit : implicit);
+  return {
+    images: pick(wired.images, fromFrame.images),
+    videos: pick(wired.videos, fromFrame.videos),
+    audios: pick(wired.audios, fromFrame.audios),
+    stickies: pick(wired.stickies, fromFrame.stickies),
+  };
+}
+
+/** Everything a board item — e.g. a settings card — draws its references from:
+ *  whatever is wired to it by connector (frame-aware, see `resolveBoardItems`),
+ *  falling back per modality to whatever shares its parent frame (see
+ *  `getFrameCardResources` and `preferWired`). A drawn line is authoritative;
+ *  frame membership is the convenience for when no line exists. */
 export async function getConnectedResources(itemId: string): Promise<ResolvedBoardItems> {
   const partnerIds = await getConnectedPartnerIds(itemId);
-  const connected = await resolveBoardItems(partnerIds);
+  const wired = await resolveBoardItems(partnerIds);
   const fromFrame = await getFrameCardResources(itemId);
-  return fromFrame ? mergeResolved(connected, fromFrame) : connected;
+  return fromFrame ? preferWired(wired, fromFrame) : wired;
 }
 
 /**

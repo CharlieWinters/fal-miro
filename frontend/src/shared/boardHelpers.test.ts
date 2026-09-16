@@ -5,7 +5,7 @@
 // so that is what these do.
 
 import { describe, it, expect } from 'vitest';
-import { makePlaceholderDataUrl, wrapPlaceholderText } from './boardHelpers';
+import { makePlaceholderDataUrl, wrapPlaceholderText, preferWired } from './boardHelpers';
 
 /** Decode a `data:image/svg+xml;base64,…` back to its SVG source. */
 function svgOf(dataUrl: string): string {
@@ -94,5 +94,71 @@ describe('makePlaceholderDataUrl', () => {
     const textNodes = svg.match(/<text/g) ?? [];
     // Label + at most MAX_DETAIL_LINES.
     expect(textNodes.length).toBeLessThanOrEqual(6);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Where a settings card gets its references.
+//
+// Reported live: re-pointing the "Image 1" connector at a different picture
+// changed nothing — the generation still used the old one. The card was not at
+// fault; it stores no image ids at all, and getConnectedResources resolves
+// them off the board every time. The rule was a UNION of "wired by connector"
+// and "shares the card's frame", and a union cannot express an exclusion: the
+// replaced image was still in the frame, so it came back as an extra reference
+// on the end. Two near-identical references of the same subject, and which one
+// the model follows is a coin toss.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const img = (id: string) => ({ id, url: `https://x/${id}.png`, title: id });
+const note = (id: string) => ({ id, content: `note ${id}` });
+const empty = { images: [], videos: [], audios: [], stickies: [] };
+
+describe('preferWired', () => {
+  it('ignores frame membership for a modality that is wired', () => {
+    // The live bug: NEW is wired, OLD is still sitting in the frame.
+    const out = preferWired(
+      { ...empty, images: [img('NEW')] },
+      { ...empty, images: [img('OLD'), img('NEW')] },
+    );
+    expect(out.images.map((i) => i.id)).toEqual(['NEW']);
+  });
+
+  it('falls back to the frame when nothing is wired', () => {
+    // The "prompt frame" model: card dropped in a frame, no lines drawn.
+    const out = preferWired(empty, { ...empty, images: [img('A'), img('B')] });
+    expect(out.images.map((i) => i.id)).toEqual(['A', 'B']);
+  });
+
+  it('decides per modality, not all or nothing', () => {
+    // Wiring just the prompt sticky must not drop every image in the frame.
+    const out = preferWired(
+      { ...empty, stickies: [note('prompt')] },
+      { ...empty, images: [img('A'), img('B')], stickies: [note('stale')] },
+    );
+    expect(out.stickies.map((s) => s.id)).toEqual(['prompt']);
+    expect(out.images.map((i) => i.id)).toEqual(['A', 'B']);
+  });
+
+  it('keeps the wired order, which is the token order', () => {
+    const out = preferWired(
+      { ...empty, images: [img('THIRD'), img('FIRST'), img('SECOND')] },
+      { ...empty, images: [img('FIRST'), img('SECOND'), img('THIRD')] },
+    );
+    expect(out.images.map((i) => i.id)).toEqual(['THIRD', 'FIRST', 'SECOND']);
+  });
+
+  it('lets a line express an exclusion — the whole point', () => {
+    // Four images in the frame, one wired: the other three are excluded.
+    const out = preferWired(
+      { ...empty, images: [img('KEEP')] },
+      { ...empty, images: [img('KEEP'), img('DROP1'), img('DROP2'), img('DROP3')] },
+    );
+    expect(out.images).toHaveLength(1);
+  });
+
+  it('returns nothing for a modality neither source has', () => {
+    const out = preferWired(empty, empty);
+    expect(out).toEqual(empty);
   });
 });
