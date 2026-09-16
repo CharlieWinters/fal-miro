@@ -22,10 +22,68 @@
   <video id="player" controls autoplay muted loop playsinline></video>
   <script>
     const url = new URLSearchParams(window.location.search).get('url');
+    const player = document.getElementById('player');
     if (url && /^https?:\/\//.test(url)) {
-      document.getElementById('player').src = url;
+      player.src = url;
+      grabPoster(url, (poster) => { player.poster = poster; });
     } else {
       document.body.textContent = 'Missing or invalid url';
+    }
+
+    /**
+     * Paint the first frame onto the player as its poster, so an iframe that
+     * cannot autoplay shows the shot instead of a black rectangle.
+     *
+     * The grab runs on a SEPARATE hidden element that opts into CORS, never on
+     * the player itself. Putting crossorigin="anonymous" on the player would
+     * turn its fetch into a CORS request, and any host that does not send
+     * Access-Control-Allow-Origin — archive.org, and most of what "Add video
+     * from URL" accepts — would stop playing at all. Fal's CDN does send it
+     * (embed-panorama.html already depends on that for its WebGL texture), so
+     * this succeeds for generated video and silently does nothing elsewhere.
+     *
+     * Every failure path is a no-op: no CORS headers, a codec the probe cannot
+     * decode, a tainted canvas. The page is exactly as it was before.
+     */
+    function grabPoster(src, onPoster) {
+      let probe;
+      try {
+        probe = document.createElement('video');
+      } catch { return; }
+      probe.crossOrigin = 'anonymous';
+      probe.muted = true;
+      probe.preload = 'metadata';
+      // A media fragment makes the browser seek a little way in and decode a
+      // frame; frame zero of a fade-in is often just black.
+      probe.src = src + (src.includes('#') ? '' : '#t=0.1');
+
+      const release = () => {
+        probe.removeAttribute('src');
+        try { probe.load(); } catch { /* nothing to release */ }
+      };
+
+      probe.addEventListener('loadeddata', () => {
+        try {
+          const w = probe.videoWidth || 0;
+          const h = probe.videoHeight || 0;
+          if (!w || !h) return release();
+          // A poster only has to look right at board scale. Capping the long
+          // edge keeps the data URI in the tens of kilobytes.
+          const scale = Math.min(1, 640 / w);
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(w * scale));
+          canvas.height = Math.max(1, Math.round(h * scale));
+          canvas.getContext('2d').drawImage(probe, 0, 0, canvas.width, canvas.height);
+          // Throws on a tainted canvas, which is the no-CORS case.
+          const poster = canvas.toDataURL('image/jpeg', 0.7);
+          release();
+          onPoster(poster);
+        } catch {
+          release();
+        }
+      }, { once: true });
+
+      probe.addEventListener('error', release, { once: true });
     }
   </script>
   <script>
