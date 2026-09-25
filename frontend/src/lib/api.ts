@@ -92,7 +92,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  *  backend already does for these same endpoints. */
 async function clientFetchJson<T>(url: string): Promise<T> {
   const key = falKey();
-  const res = await fetch(url, { headers: key ? { Authorization: `Key ${key}` } : {} });
+  let res = await fetch(url, { headers: key ? { Authorization: `Key ${key}` } : {} });
+  // These reads are public; the key only buys a higher rate limit. So a key
+  // the Platform API refuses (revoked, a typo, or one without that API's
+  // scope) must not take the model list and every schema down with it —
+  // which it did, and the reference-to-video screen then reported the model
+  // as having no reference fields. Retry once without it. Generation still
+  // uses the key and still fails loudly if it is bad.
+  if (key && (res.status === 401 || res.status === 403)) {
+    console.warn(`[api] Fal Platform API refused the saved key (${res.status}); retrying without it`);
+    res = await fetch(url);
+  }
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
   if (!res.ok) {
