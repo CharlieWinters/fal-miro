@@ -60,7 +60,7 @@ const PROMPT_FALLBACK: Field[] = [{ name: 'prompt', label: 'Prompt', kind: 'text
 type SchemaState =
   | { status: 'loading' }
   | { status: 'ready'; fields: Field[] }
-  | { status: 'fallback'; fields: Field[] };
+  | { status: 'fallback'; fields: Field[]; error?: string };
 
 export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?: RecipeSeed | null }) {
   const blend = isBlendReference(model); // Veo: images-only blend, no @tokens
@@ -90,9 +90,12 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
           setValues(defaultsFor(fields));
         }
       })
-      .catch(() => {
+      .catch((err) => {
         if (!mounted) return;
-        setSchema({ status: 'fallback', fields: PROMPT_FALLBACK });
+        // Keep the reason. Dropping it is what turned an invalid Fal key into
+        // "this model declares no reference field", which points at the model
+        // rather than at Settings.
+        setSchema({ status: 'fallback', fields: PROMPT_FALLBACK, error: String(err?.message ?? err) });
         setValues({});
       });
     return () => {
@@ -236,6 +239,11 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
     // same tick the schema lands. Generating first sends the defaults with none
     // of the card's values — right prompt, wrong frame, real money.
     if (schema.status === 'loading') return 'Reading the model’s inputs…';
+    if (schema.status === 'fallback' && schema.error) {
+      return /invalid api key|unauthori[sz]ed|\b401\b/i.test(schema.error)
+        ? 'Fal rejected the API key saved in this browser, so the model’s inputs couldn’t be read. Save a valid key in Settings.'
+        : `Couldn’t read the model’s inputs from Fal (${schema.error}). Try reopening the model.`;
+    }
     if (referenceFieldNames.length === 0) {
       return 'This model declares no reference field the panel recognises — use the generic model form for it.';
     }
@@ -472,6 +480,9 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
               Generate video
             </button>
           </div>
+          {/* A disabled button's tooltip is easy to miss, so the reason is
+              also written out. Without it a blocked Generate reads as a bug. */}
+          {blockReason && !note && <div className="hint">{blockReason}</div>}
         </>
       )}
 

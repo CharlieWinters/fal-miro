@@ -90,9 +90,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  *  by client mode's schema/models/pricing lookups, which have no backend to
  *  proxy through. Includes the Fal key for higher rate limits, same as the
  *  backend already does for these same endpoints. */
-async function clientFetchJson<T>(url: string): Promise<T> {
-  const key = falKey();
-  const res = await fetch(url, { headers: key ? { Authorization: `Key ${key}` } : {} });
+async function clientFetchJson<T>(url: string, opts: { anonymous?: boolean } = {}): Promise<T> {
+  const key = opts.anonymous ? null : falKey();
+  let res = await fetch(url, { headers: key ? { Authorization: `Key ${key}` } : {} });
+  // These reads are public; the key only buys a higher rate limit. So a key
+  // the Platform API refuses (revoked, a typo, or one without that API's
+  // scope) must not take the model list and every schema down with it —
+  // which it did, and the reference-to-video screen then reported the model
+  // as having no reference fields. Retry once without it. Generation still
+  // uses the key and still fails loudly if it is bad.
+  if (key && (res.status === 401 || res.status === 403)) {
+    console.warn(`[api] Fal Platform API refused the saved key (${res.status}); retrying without it`);
+    res = await fetch(url);
+  }
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
   if (!res.ok) {
@@ -210,8 +220,25 @@ async function clientGetSchema(endpointId: string): Promise<SchemaResponse> {
   const payload: any = await clientFetchJson(url);
   const model = Array.isArray(payload.models) ? payload.models[0] : undefined;
   if (!model) throw new Error(`No model found for endpoint_id "${endpointId}"`);
-  const openapi = model.openapi && !model.openapi.error ? model.openapi : null;
-  if (!openapi) throw new Error(model.openapi?.error?.message ?? 'OpenAPI expansion unavailable for this model');
+  let openapi = model.openapi && !model.openapi.error ? model.openapi : null;
+  let expansionError: string | undefined = model.openapi?.error?.message;
+  // Seen on 25 Sep 2026 for minimax/h3/reference-to-video: the same request
+  // expands fine with no key and returns "Failed to fetch OpenAPI schema"
+  // with one. The schema is public, so ask again anonymously before giving
+  // up — otherwise the screen falls back to a prompt-only form and the model
+  // looks like it has no reference fields.
+  if (!openapi && falKey()) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const retry: any = await clientFetchJson(url, { anonymous: true }).catch(() => null);
+    const again = Array.isArray(retry?.models) ? retry.models[0] : undefined;
+    if (again?.openapi && !again.openapi.error) {
+      console.warn(`[api] schema for ${endpointId} only expanded without the saved key`);
+      openapi = again.openapi;
+    } else {
+      expansionError = again?.openapi?.error?.message ?? expansionError;
+    }
+  }
+  if (!openapi) throw new Error(expansionError ?? 'OpenAPI expansion unavailable for this model');
   return { endpointId: model.endpoint_id, metadata: model.metadata ?? null, openapi };
 }
 
