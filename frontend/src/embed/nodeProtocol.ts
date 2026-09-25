@@ -6,6 +6,7 @@ export const PAGE_MSG = {
   hello: 'fal-node:hello',
   state: 'fal-node:state',
   open: 'fal-node:open',
+  generate: 'fal-node:generate',
   opened: 'fal-node:opened',
   error: 'fal-node:error',
   changed: 'fal-node:changed',

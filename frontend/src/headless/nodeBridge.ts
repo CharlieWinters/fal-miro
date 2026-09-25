@@ -2,27 +2,53 @@
 // board, no SDK) asks; this iframe (has the SDK, runs for anyone with the app
 // installed, panel open or not) answers from board state.
 //
-// Two requests, and neither spends money — see node.ts, rule 1:
-//   hello {nid} → the node's state (model, settings, wired references, prompt,
-//                  last result), read from the embed's metadata and connectors
-//   open  {nid} → open the panel on this node, where Generate lives
+// Three requests, and none of them spends money — see node.ts, rule 1:
+//   hello    {nid} → the node's state, read from its metadata and connectors
+//   open     {nid} → open the panel on this node
+//   generate {nid} → open the app's confirm modal for this node; the run
+//                    starts only when the director clicks Generate in it
+//
+// It also watches runs anchored on a node (RUN_AGENT / AGENT_UPDATE pass
+// through this frame) so the node can show progress.
 
-import { findModel } from '../shared/falCatalog';
+import { findModel, isReferenceToVideo, type FalModel } from '../shared/falCatalog';
 import { getConnectedResources } from '../shared/boardHelpers';
-import { isOurs, ownOrigin, postToSiblings } from '../shared/frameMessaging';
-import { NODE_MSG, buildNodeState, parseNodeRequest, type NodeState } from '../shared/node';
-import { findNodeByNid } from '../shared/nodeBoard';
+import { estimateCostUSD } from '../shared/cost';
+import { isOurs, ownOrigin, postToAllFrames, postToSiblings } from '../shared/frameMessaging';
+import { AGENT_UPDATE, RUN_AGENT } from '../shared/messageTypes';
+import { NODE_MSG, buildNodeState, parseNodeRequest, type NodeJob, type NodeState } from '../shared/node';
+import { findNodeByNid, readNode } from '../shared/nodeBoard';
 
 function reply(event: MessageEvent, payload: Record<string, unknown>): void {
   // Exact origin — the one we already checked the request came from.
   (event.source as Window | null)?.postMessage(payload, ownOrigin());
 }
 
+/** embed id → the latest run anchored on it. In memory: a reload forgets it,
+ *  and the node falls back to its last recorded result. */
+const jobs = new Map<string, NodeJob>();
+/** requestId → embed id, for matching updates back to their node. */
+const requestToNode = new Map<string, string>();
+
+function modelFor(endpointId: string, capability: string): FalModel {
+  return findModel(endpointId) ?? ({ endpointId, label: endpointId, capability } as FalModel);
+}
+
 async function stateFor(nid: string): Promise<NodeState> {
   const node = await findNodeByNid(nid);
   if (!node) return { nid, found: false };
-  const connected = await getConnectedResources(node.embed.id);
-  return buildNodeState(node.meta, connected, findModel(node.meta.recipe.endpointId)?.label);
+  const { recipe } = node.meta;
+  const model = modelFor(recipe.endpointId, recipe.capability);
+  const [connected, costUSD] = await Promise.all([
+    getConnectedResources(node.embed.id),
+    estimateCostUSD(recipe.endpointId, { units: 1, seconds: Number(recipe.input?.duration) || undefined }),
+  ]);
+  return {
+    ...buildNodeState(node.meta, connected, findModel(recipe.endpointId)?.label),
+    canGenerate: isReferenceToVideo(model),
+    ...(costUSD !== undefined ? { costUSD } : {}),
+    job: jobs.get(node.embed.id) ?? null,
+  };
 }
 
 async function openOnNode(nid: string): Promise<void> {
@@ -40,6 +66,18 @@ async function openOnNode(nid: string): Promise<void> {
   }
 }
 
+/** Opens the confirm modal. It rebuilds the run from the board itself. */
+async function confirmGenerate(nid: string): Promise<void> {
+  const node = await findNodeByNid(nid);
+  if (!node) throw new Error('This node is no longer on the board.');
+  if (jobs.get(node.embed.id)?.status === 'running') throw new Error('This node is already generating.');
+  await miro.board.ui.openModal({
+    url: `modal.html?tool=node-generate&itemId=${encodeURIComponent(node.embed.id)}`,
+    width: 520,
+    height: 680,
+  });
+}
+
 async function handle(event: MessageEvent): Promise<void> {
   if (!isOurs(event)) return;
   const req = parseNodeRequest(event.data);
@@ -50,15 +88,65 @@ async function handle(event: MessageEvent): Promise<void> {
     return;
   }
   try {
-    await openOnNode(req.nid);
-    reply(event, { type: NODE_MSG.opened, v: 1, nid: req.nid });
+    if (req.type === NODE_MSG.generate) await confirmGenerate(req.nid);
+    else await openOnNode(req.nid);
+    reply(event, { type: NODE_MSG.opened, v: 1, nid: req.nid, what: req.type === NODE_MSG.generate ? 'confirm' : 'panel' });
   } catch (e) {
     reply(event, { type: NODE_MSG.error, v: 1, nid: req.nid, error: e instanceof Error ? e.message : String(e) });
   }
 }
 
+/** Nudge the node, at most every couple of seconds while a run reports progress. */
+const lastNudge = new Map<string, number>();
+async function nudge(embedId: string, force = false): Promise<void> {
+  const now = Date.now();
+  if (!force && now - (lastNudge.get(embedId) ?? 0) < 2000) return;
+  lastNudge.set(embedId, now);
+  const node = await readNode(embedId);
+  if (node) postToAllFrames({ type: NODE_MSG.changed, v: 1, nid: node.meta.nid });
+}
+
+/**
+ * Runs pass through this frame whichever surface started them (the confirm
+ * modal, or the panel opened on a node). Only same-origin messages count, and
+ * nothing here acts on them beyond remembering status for display.
+ */
+function watchJobs(event: MessageEvent): void {
+  if (!isOurs(event)) return;
+  const d = event.data as {
+    type?: string;
+    requestId?: string;
+    status?: string;
+    message?: string;
+    payload?: { cardAnchorId?: unknown };
+  } | null;
+  if (!d || typeof d !== 'object' || typeof d.requestId !== 'string') return;
+
+  if (d.type === RUN_AGENT) {
+    const anchor = d.payload?.cardAnchorId;
+    if (typeof anchor !== 'string') return;
+    void readNode(anchor).then((node) => {
+      if (!node) return;
+      requestToNode.set(d.requestId as string, anchor);
+      jobs.set(anchor, { status: 'running', message: 'Starting…', startedAt: Date.now() });
+      void nudge(anchor, true);
+    });
+    return;
+  }
+  if (d.type === AGENT_UPDATE) {
+    const embedId = requestToNode.get(d.requestId);
+    if (!embedId) return;
+    const prev = jobs.get(embedId);
+    const status = d.status === 'succeeded' ? 'succeeded' : d.status === 'failed' ? 'failed' : 'running';
+    jobs.set(embedId, { status, message: d.message, startedAt: prev?.startedAt ?? Date.now() });
+    if (status !== 'running') requestToNode.delete(d.requestId);
+    void nudge(embedId, status !== 'running');
+  }
+}
+
 export function initNodeBridge(): void {
   window.addEventListener('message', (event) => {
+    watchJobs(event);
     handle(event).catch((err) => console.error('[nodeBridge] handler error:', err));
   });
 }

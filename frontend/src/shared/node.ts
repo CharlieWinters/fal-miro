@@ -10,9 +10,11 @@
 // its state over postMessage, so it works with the panel closed.
 //
 // The security rules come from miro-terminal's host bridge:
-//   1. A node can ask for its state, or ask to open the panel on itself.
-//      Nothing that crosses the channel runs a model or spends money — the
-//      director presses Generate in the panel, where the cost is shown.
+//   1. A node can ask for its state, ask to open the panel on itself, or ask
+//      to generate. None of those runs a model or spends money: generate only
+//      opens the app's own confirm modal, and the run starts when the
+//      director clicks Generate there, with the cost shown. The modal builds
+//      the run from the board, never from the message.
 //   2. A node sends only its nid. Everything the app does is read from the
 //      board (the embed's metadata, its connectors), never from the message.
 //   3. Exact origins only, never '*'.
@@ -60,6 +62,8 @@ export const NODE_MSG = {
   hello: 'fal-node:hello',
   state: 'fal-node:state',
   open: 'fal-node:open',
+  /** Node → headless: open the confirm modal for a run. */
+  generate: 'fal-node:generate',
   opened: 'fal-node:opened',
   error: 'fal-node:error',
   /** Headless → nodes: a node's metadata changed; re-ask. */
@@ -68,15 +72,18 @@ export const NODE_MSG = {
   focus: 'fal-node:focus',
 } as const;
 
-/** What node.html sends. Only these two, and only a nid. */
-export type NodeRequest = { type: typeof NODE_MSG.hello | typeof NODE_MSG.open; v: 1; nid: string };
+type RequestType = typeof NODE_MSG.hello | typeof NODE_MSG.open | typeof NODE_MSG.generate;
+const REQUEST_TYPES: readonly string[] = [NODE_MSG.hello, NODE_MSG.open, NODE_MSG.generate];
+
+/** What node.html sends. Only these three, and only a nid. */
+export type NodeRequest = { type: RequestType; v: 1; nid: string };
 
 export function parseNodeRequest(data: unknown): NodeRequest | null {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
-  if (d.type !== NODE_MSG.hello && d.type !== NODE_MSG.open) return null;
+  if (typeof d.type !== 'string' || !REQUEST_TYPES.includes(d.type)) return null;
   if (typeof d.nid !== 'string' || !isNid(d.nid)) return null;
-  return { type: d.type, v: 1, nid: d.nid };
+  return { type: d.type as RequestType, v: 1, nid: d.nid };
 }
 
 /** A nid is a UUID. Checked so a message can't smuggle anything else through. */
@@ -136,7 +143,14 @@ export type NodeState = {
   prompt?: { text: string; source: 'sticky' | 'saved' } | null;
   references?: { images: string[]; videos: string[]; audios: string[] };
   lastOutput?: NodeOutput | null;
+  /** Generate from the node is offered for reference-to-video models only, for now. */
+  canGenerate?: boolean;
+  costUSD?: number;
+  /** A run anchored on this node, as the headless iframe last heard of it. */
+  job?: NodeJob | null;
 };
+
+export type NodeJob = { status: 'running' | 'succeeded' | 'failed'; message?: string; startedAt: number };
 
 /** Input keys worth showing on the node, in display order. */
 const SHOWN_SETTINGS: Array<[key: string, label: string]> = [

@@ -31,6 +31,9 @@ type State = {
   prompt?: { text: string; source: 'sticky' | 'saved' } | null;
   references?: { images: string[]; videos: string[]; audios: string[] };
   lastOutput?: Output | null;
+  canGenerate?: boolean;
+  costUSD?: number;
+  job?: { status: 'running' | 'succeeded' | 'failed'; message?: string; startedAt: number } | null;
 };
 
 const origin = window.location.origin;
@@ -110,6 +113,9 @@ let openNote: HTMLElement | null = null;
 let openButton: HTMLButtonElement | null = null;
 
 function renderState(s: State): void {
+  if (jobTimer) clearInterval(jobTimer);
+  jobTimer = null;
+  genButton = null;
   if (!s.found) {
     centre(
       el('strong', undefined, 'This node isn’t set up'),
@@ -166,30 +172,65 @@ function renderState(s: State): void {
     main.append(box);
   }
 
+  const job = s.job;
+  if (job && job.status !== 'succeeded') {
+    const box = el('div', job.status === 'failed' ? 'box job failed' : 'box job');
+    box.append(el('div', 'label', job.status === 'failed' ? 'Last run failed' : 'Generating'));
+    const line = el('div', 'prompt', job.message ?? '');
+    if (job.status === 'running') {
+      const tick = () => {
+        const secs = Math.max(0, Math.round((Date.now() - job.startedAt) / 1000));
+        line.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} · ${job.message ?? ''}`;
+      };
+      tick();
+      jobTimer = setInterval(tick, 1000);
+    }
+    box.append(line);
+    main.prepend(box);
+  }
+
   const footer = el('footer');
-  openButton = el('button', undefined, 'Open in Fal');
+  const running = job?.status === 'running';
+  if (s.canGenerate) {
+    const cost = typeof s.costUSD === 'number' ? ` · about $${s.costUSD.toFixed(2)}` : '';
+    genButton = el('button', undefined, running ? 'Generating…' : `Generate${cost}`);
+    genButton.type = 'button';
+    genButton.disabled = running;
+    genButton.addEventListener('click', () => request(PAGE_MSG.generate));
+    footer.append(genButton);
+  }
+  openButton = el('button', s.canGenerate ? 'secondary' : undefined, 'Open in Fal');
   openButton.type = 'button';
-  openButton.addEventListener('click', onOpen);
-  openNote = el('div', 'note', 'Opens the Fal panel on this node. Generate from there.');
+  openButton.addEventListener('click', () => request(PAGE_MSG.open));
+  openNote = el(
+    'div',
+    'note',
+    s.canGenerate ? 'Generate asks you to confirm, with the cost, before anything runs.' : 'Opens the Fal panel on this node. Generate from there.',
+  );
   footer.append(openButton, openNote);
 
   root.replaceChildren(main, footer);
 }
 
+let jobTimer: ReturnType<typeof setInterval> | null = null;
+let genButton: HTMLButtonElement | null = null;
+
 let openTimer: ReturnType<typeof setTimeout> | null = null;
-function onOpen(): void {
-  if (!openButton || !openNote) return;
-  openButton.disabled = true;
-  openButton.textContent = 'Opening…';
-  post({ type: PAGE_MSG.open, v: 1, nid });
+function request(type: typeof PAGE_MSG.open | typeof PAGE_MSG.generate): void {
+  if (!openNote) return;
+  if (openButton) openButton.disabled = true;
+  if (genButton) genButton.disabled = true;
+  openNote.className = 'note';
+  openNote.textContent = type === PAGE_MSG.generate ? 'Opening the confirm window…' : 'Opening the Fal panel…';
+  post({ type, v: 1, nid });
   openTimer = setTimeout(() => finishOpen('No answer from the app. Try again, or open the panel from the toolbar.', true), OPEN_TIMEOUT_MS);
 }
 function finishOpen(message: string, isError: boolean): void {
   if (openTimer) clearTimeout(openTimer);
   openTimer = null;
-  if (!openButton || !openNote) return;
-  openButton.disabled = false;
-  openButton.textContent = 'Open in Fal';
+  if (openButton) openButton.disabled = false;
+  if (genButton && genButton.textContent !== 'Generating…') genButton.disabled = false;
+  if (!openNote) return;
   openNote.textContent = message;
   openNote.className = isError ? 'note err' : 'note';
 }
@@ -204,7 +245,8 @@ function onMessage(event: MessageEvent): void {
     if (event.source && 'postMessage' in event.source) appFrame = event.source as Window;
     renderState(d as unknown as State);
   } else if (d.type === PAGE_MSG.opened) {
-    finishOpen('Opened in the Fal panel.', false);
+    const what = (d as { what?: unknown }).what;
+    finishOpen(what === 'confirm' ? 'Confirm in the Fal window to start.' : 'Opened in the Fal panel.', false);
   } else if (d.type === PAGE_MSG.error) {
     finishOpen(String((d as { error?: unknown }).error ?? 'The app could not open this node.'), true);
   } else if (d.type === PAGE_MSG.changed) {

@@ -40,6 +40,10 @@
       background: var(--accent); color: var(--on-accent); font-family: inherit; font-size: 14px; font-weight: 700;
     }
     button:disabled { opacity: 0.6; cursor: default; }
+    button + button { margin-top: 8px; }
+    button.secondary { background: transparent; color: var(--fg-2); border: 1px solid var(--border); }
+    .job { border-color: rgba(255, 221, 51, 0.4); }
+    .job.failed { border-color: rgba(242, 90, 110, 0.5); }
     .note { font-size: 12px; color: var(--muted); margin-top: 8px; text-align: center; }
     .note.err { color: var(--err); }
     .centre {

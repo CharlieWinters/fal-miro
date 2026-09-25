@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { startAgentJob } from '../communication';
+import { buildRefVideoInput as buildInput, refVideoPayload } from '../../shared/refVideoJob';
 import { SchemaForm } from '../SchemaForm';
 import { api } from '../../lib/api';
 import { COMMON_ARGS, isBlendReference, type FalModel } from '../../shared/falCatalog';
@@ -273,25 +274,20 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
       agentId: 'fal_video_gen',
       label: `${model.label} · video`,
       kind: 'video',
-      payload: {
+      payload: refVideoPayload({
         endpointId: model.endpointId,
         input,
-        placeholderRatio: ratioFromValues(values),
-        references: {
-          imageIds: images.map((i) => i.id),
-          ...(supportsVideoRefs ? { videoIds: videos.map((v) => v.id) } : {}),
-          ...(supportsAudio ? { audioIds: audios.map((a) => a.id) } : {}),
-          ...(blend ? { blend: true } : {}),
-          // Resolved from this model's schema, so the agent never has to guess.
-          fields: {
-            ...(imageRefField ? { image: imageRefField.name } : {}),
-            ...(videoRefField ? { video: videoRefField.name } : {}),
-            ...(audioField ? { audio: audioField.name } : {}),
-          },
-        },
+        values,
+        images,
+        videos,
+        audios,
+        blend,
+        imageRefField,
+        videoRefField: supportsVideoRefs ? videoRefField : null,
+        audioField: supportsAudio ? audioField : null,
         ...(seed ? { cardAnchorId: seed.cardId } : {}),
         ...(referenceFrameId ? { referenceFrameId } : {}),
-      },
+      }),
     });
     setNote('Video generation started — this takes a few minutes. Watch the board (and the tray above).');
   };
@@ -480,41 +476,3 @@ export function ReferenceToVideoScreen({ model, seed }: { model: FalModel; seed?
   );
 }
 
-function buildInput(
-  fields: Field[],
-  values: Record<string, unknown>,
-  referenceFieldNames: string[],
-): Record<string, unknown> {
-  const jsonFields = new Set(fields.filter((f) => f.kind === 'json').map((f) => f.name));
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(values)) {
-    if (v === undefined || v === null || v === '') continue;
-    if (referenceFieldNames.includes(k)) continue; // driven by the baskets
-    if (jsonFields.has(k) && typeof v === 'string') {
-      try {
-        out[k] = JSON.parse(v);
-      } catch {
-        /* skip invalid json field */
-      }
-    } else {
-      out[k] = v;
-    }
-  }
-  return out;
-}
-
-const SIZE_TO_RATIO: Record<string, string> = {
-  '21:9': '21:9',
-  '16:9': '16:9',
-  '4:3': '4:3',
-  '1:1': '1:1',
-  '3:4': '3:4',
-  '9:16': '9:16',
-};
-
-/** The chosen aspect_ratio → placeholder ratio, or undefined for "auto". */
-function ratioFromValues(values: Record<string, unknown>): string | undefined {
-  const ar = values.aspect_ratio;
-  if (typeof ar === 'string' && SIZE_TO_RATIO[ar]) return ar;
-  return undefined;
-}

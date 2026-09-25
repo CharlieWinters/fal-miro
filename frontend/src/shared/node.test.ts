@@ -46,13 +46,14 @@ describe('protocol', () => {
 });
 
 describe('parseNodeRequest', () => {
-  it('accepts hello and open with a uuid nid', () => {
+  it('accepts hello, open and generate with a uuid nid', () => {
+    expect(parseNodeRequest({ type: 'fal-node:generate', nid: NID })?.type).toBe('fal-node:generate');
     expect(parseNodeRequest({ type: 'fal-node:hello', v: 1, nid: NID })).toEqual({ type: 'fal-node:hello', v: 1, nid: NID });
     expect(parseNodeRequest({ type: 'fal-node:open', nid: NID })?.type).toBe('fal-node:open');
   });
 
   it('refuses every other message type, including the ones only the app sends', () => {
-    for (const type of ['fal-node:state', 'fal-node:focus', 'fal-node:changed', 'run-agent', 'fal-node:generate']) {
+    for (const type of ['fal-node:state', 'fal-node:focus', 'fal-node:changed', 'run-agent', 'fal-node:run']) {
       expect(parseNodeRequest({ type, nid: NID })).toBeNull();
     }
   });
@@ -66,6 +67,9 @@ describe('parseNodeRequest', () => {
   it('keeps nothing but the nid — extra fields in the message are dropped', () => {
     const req = parseNodeRequest({ type: 'fal-node:open', nid: NID, endpointId: 'x', input: { prompt: 'y' } });
     expect(req).toEqual({ type: 'fal-node:open', v: 1, nid: NID });
+    // Above all for generate: a message must not be able to choose what runs.
+    const gen = parseNodeRequest({ type: 'fal-node:generate', nid: NID, payload: { endpointId: 'x' }, confirm: true });
+    expect(gen).toEqual({ type: 'fal-node:generate', v: 1, nid: NID });
   });
 
   it('refuses non-objects', () => {
