@@ -6,7 +6,6 @@ import { RigPoseScreen } from '../panel/screens/RigPoseScreen';
 import { BonePoseScreen } from '../panel/screens/BonePoseScreen';
 import { SceneBuilderScreen } from '../panel/screens/SceneBuilderScreen';
 import { MotionStripScreen } from '../panel/screens/MotionStripScreen';
-import { NodeGenerateScreen } from './NodeGenerateScreen';
 import { loadBackendConfig } from '../shared/backendConfig';
 import '../styles/index.css';
 
@@ -40,9 +39,6 @@ function ModalApp() {
   }
   if (itemId && tool === 'motion-to-strip') {
     return <MotionStripScreen itemId={itemId} onClose={close} />;
-  }
-  if (itemId && tool === 'node-generate') {
-    return <NodeGenerateScreen embedId={itemId} onClose={close} />;
   }
   if (tool === 'scene-builder') {
     return <SceneBuilderScreen onClose={close} />;

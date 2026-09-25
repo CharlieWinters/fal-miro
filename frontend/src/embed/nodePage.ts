@@ -205,7 +205,7 @@ function renderState(s: State): void {
   openNote = el(
     'div',
     'note',
-    s.canGenerate ? 'Generate asks you to confirm, with the cost, before anything runs.' : 'Opens the Fal panel on this node. Generate from there.',
+    s.canGenerate ? 'Generate runs straight away. The result lands beside the node.' : 'Opens the Fal panel on this node. Generate from there.',
   );
   footer.append(openButton, openNote);
 
@@ -221,7 +221,7 @@ function request(type: typeof PAGE_MSG.open | typeof PAGE_MSG.generate): void {
   if (openButton) openButton.disabled = true;
   if (genButton) genButton.disabled = true;
   openNote.className = 'note';
-  openNote.textContent = type === PAGE_MSG.generate ? 'Opening the confirm window…' : 'Opening the Fal panel…';
+  openNote.textContent = type === PAGE_MSG.generate ? 'Starting…' : 'Opening the Fal panel…';
   post({ type, v: 1, nid });
   openTimer = setTimeout(() => finishOpen('No answer from the app. Try again, or open the panel from the toolbar.', true), OPEN_TIMEOUT_MS);
 }
@@ -246,7 +246,7 @@ function onMessage(event: MessageEvent): void {
     renderState(d as unknown as State);
   } else if (d.type === PAGE_MSG.opened) {
     const what = (d as { what?: unknown }).what;
-    finishOpen(what === 'confirm' ? 'Confirm in the Fal window to start.' : 'Opened in the Fal panel.', false);
+    finishOpen(what === 'started' ? 'Started on Fal.' : 'Opened in the Fal panel.', false);
   } else if (d.type === PAGE_MSG.error) {
     finishOpen(String((d as { error?: unknown }).error ?? 'The app could not open this node.'), true);
   } else if (d.type === PAGE_MSG.changed) {

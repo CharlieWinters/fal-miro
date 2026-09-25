@@ -11,10 +11,11 @@
 //
 // The security rules come from miro-terminal's host bridge:
 //   1. A node can ask for its state, ask to open the panel on itself, or ask
-//      to generate. None of those runs a model or spends money: generate only
-//      opens the app's own confirm modal, and the run starts when the
-//      director clicks Generate there, with the cost shown. The modal builds
-//      the run from the board, never from the message.
+//      to generate. Generate spends money, but the message can't choose what
+//      runs: the run is rebuilt from the node's board state (shared/nodeRun.ts),
+//      and a node that is already generating refuses a second run. No confirm
+//      step, by choice — the panel's own RUN_AGENT already trusts every frame
+//      on this origin, so a modal here guarded little and cost a click.
 //   2. A node sends only its nid. Everything the app does is read from the
 //      board (the embed's metadata, its connectors), never from the message.
 //   3. Exact origins only, never '*'.
@@ -62,7 +63,7 @@ export const NODE_MSG = {
   hello: 'fal-node:hello',
   state: 'fal-node:state',
   open: 'fal-node:open',
-  /** Node → headless: open the confirm modal for a run. */
+  /** Node → headless: start this node's run. */
   generate: 'fal-node:generate',
   opened: 'fal-node:opened',
   error: 'fal-node:error',

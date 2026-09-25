@@ -411,10 +411,15 @@ as for cards.
   `fal-node:hello {nid}` at our own origin; `headless/nodeBridge.ts` answers
   with state read from the board. Nobody answering means the viewer lacks the
   app, and the page says so. This is miro-terminal's embed-to-app pattern.
-- **A node never spends money by itself.** The bridge accepts two requests,
-  `hello` and `open`, and `open` only opens the panel on the node, where
-  Generate lives. That matters because `charliewinters.github.io` is shared by
-  every Pages repo on the account, so any of them passes the origin check.
+- **Generate runs from the node.** The bridge accepts `hello`, `open` and
+  `generate`, each carrying only a UUID nid. `generate` rebuilds the run from
+  the node's board state (`shared/nodeRun.ts`, same payload builder as the
+  panel's reference-to-video screen) and posts RUN_AGENT like the panel does,
+  so a message can trigger a node's run but can't choose what runs. A node
+  already generating refuses a second run. There is deliberately no confirm
+  step: `charliewinters.github.io` is shared by every Pages repo on the
+  account, but the panel's RUN_AGENT already trusts every frame on that
+  origin, so a confirm modal here guarded little.
 - **After a run** started from a node, the image and video agents write
   `lastOutput` to the node and set its `previewUrl` to the result, then nudge
   the node to refresh. Before the first run the node shows `node-poster.png`.

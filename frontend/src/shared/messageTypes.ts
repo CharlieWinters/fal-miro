@@ -8,7 +8,8 @@ export type RunAgentMessage = {
   agentId: string;
   requestId: string;
   payload: unknown;
-  source: 'panel' | 'modal';
+  /** 'node' = started by an embed node's Generate, via headless/nodeBridge. */
+  source: 'panel' | 'modal' | 'node';
 };
 
 export type AgentUpdateMessage = {

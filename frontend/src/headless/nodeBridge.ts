@@ -2,11 +2,12 @@
 // board, no SDK) asks; this iframe (has the SDK, runs for anyone with the app
 // installed, panel open or not) answers from board state.
 //
-// Three requests, and none of them spends money — see node.ts, rule 1:
+// Three requests. Only generate spends money, and it can't choose what runs
+// — see node.ts, rule 1:
 //   hello    {nid} → the node's state, read from its metadata and connectors
 //   open     {nid} → open the panel on this node
-//   generate {nid} → open the app's confirm modal for this node; the run
-//                    starts only when the director clicks Generate in it
+//   generate {nid} → build this node's run from the board and start it, by
+//                    posting RUN_AGENT exactly as the panel does
 //
 // It also watches runs anchored on a node (RUN_AGENT / AGENT_UPDATE pass
 // through this frame) so the node can show progress.
@@ -18,6 +19,7 @@ import { isOurs, ownOrigin, postToAllFrames, postToSiblings } from '../shared/fr
 import { AGENT_UPDATE, RUN_AGENT } from '../shared/messageTypes';
 import { NODE_MSG, buildNodeState, parseNodeRequest, type NodeJob, type NodeState } from '../shared/node';
 import { findNodeByNid, readNode } from '../shared/nodeBoard';
+import { buildNodeRun } from '../shared/nodeRun';
 
 function reply(event: MessageEvent, payload: Record<string, unknown>): void {
   // Exact origin — the one we already checked the request came from.
@@ -66,16 +68,29 @@ async function openOnNode(nid: string): Promise<void> {
   }
 }
 
-/** Opens the confirm modal. It rebuilds the run from the board itself. */
-async function confirmGenerate(nid: string): Promise<void> {
+/** Nodes whose run is being assembled, so a double click can't start two. */
+const starting = new Set<string>();
+
+/**
+ * Start a node's run. Everything in it — model, prompt, references, settings
+ * — is read from the board by buildNodeRun; the message only named the node.
+ * Posted as RUN_AGENT to our own frames, so the same listener that runs the
+ * panel's jobs runs this one, and watchJobs below picks it up for progress.
+ */
+async function generateFromNode(nid: string): Promise<void> {
   const node = await findNodeByNid(nid);
   if (!node) throw new Error('This node is no longer on the board.');
-  if (jobs.get(node.embed.id)?.status === 'running') throw new Error('This node is already generating.');
-  await miro.board.ui.openModal({
-    url: `modal.html?tool=node-generate&itemId=${encodeURIComponent(node.embed.id)}`,
-    width: 520,
-    height: 680,
-  });
+  const id = node.embed.id;
+  if (starting.has(id) || jobs.get(id)?.status === 'running') throw new Error('This node is already generating.');
+  starting.add(id);
+  try {
+    const plan = await buildNodeRun(id);
+    const requestId = `node_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    jobs.set(id, { status: 'running', message: 'Starting…', startedAt: Date.now() });
+    postToSiblings({ type: RUN_AGENT, agentId: 'fal_video_gen', requestId, payload: plan.payload, source: 'node' });
+  } finally {
+    starting.delete(id);
+  }
 }
 
 async function handle(event: MessageEvent): Promise<void> {
@@ -88,9 +103,9 @@ async function handle(event: MessageEvent): Promise<void> {
     return;
   }
   try {
-    if (req.type === NODE_MSG.generate) await confirmGenerate(req.nid);
+    if (req.type === NODE_MSG.generate) await generateFromNode(req.nid);
     else await openOnNode(req.nid);
-    reply(event, { type: NODE_MSG.opened, v: 1, nid: req.nid, what: req.type === NODE_MSG.generate ? 'confirm' : 'panel' });
+    reply(event, { type: NODE_MSG.opened, v: 1, nid: req.nid, what: req.type === NODE_MSG.generate ? 'started' : 'panel' });
   } catch (e) {
     reply(event, { type: NODE_MSG.error, v: 1, nid: req.nid, error: e instanceof Error ? e.message : String(e) });
   }
@@ -107,8 +122,8 @@ async function nudge(embedId: string, force = false): Promise<void> {
 }
 
 /**
- * Runs pass through this frame whichever surface started them (the confirm
- * modal, or the panel opened on a node). Only same-origin messages count, and
+ * Runs pass through this frame whichever surface started them (a node's
+ * Generate, or the panel opened on a node). Only same-origin messages count, and
  * nothing here acts on them beyond remembering status for display.
  */
 function watchJobs(event: MessageEvent): void {
