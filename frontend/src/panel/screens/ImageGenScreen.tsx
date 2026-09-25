@@ -580,6 +580,9 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
                       : 'Generate image'}
             </button>
           </div>
+          {/* A disabled button's tooltip is easy to miss, so the reason is
+              also written out. Without it a blocked Generate reads as a bug. */}
+          {blockReason && !note && <div className="hint">{blockReason}</div>}
         </>
       )}
 
