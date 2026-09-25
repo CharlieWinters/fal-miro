@@ -31,6 +31,7 @@ export function SettingsScreen({ forceBackendSetup, onBackendConfigured }: Setti
 
   const [cats, setCats] = useState<Set<string>>(() => new Set(current.categories ?? categories));
   const [provs, setProvs] = useState<Set<string>>(() => new Set(current.providers ?? providers));
+  const [marqueeOnly, setMarqueeOnly] = useState(current.marqueeOnly !== false);
   const [note, setNote] = useState<string | null>(null);
 
   const savedConnection = getConnectionConfig();
@@ -89,6 +90,7 @@ export function SettingsScreen({ forceBackendSetup, onBackendConfigured }: Setti
     const filter: CatalogFilter = {
       categories: cats.size === categories.length ? null : [...cats],
       providers: provs.size === providers.length ? null : [...provs],
+      marqueeOnly,
     };
     setActiveCatalogFilter(filter); // live-updates Browse immediately
     try {
@@ -242,6 +244,24 @@ export function SettingsScreen({ forceBackendSetup, onBackendConfigured }: Setti
             <div className="title">Curate models</div>
             <div className="sub">Choose what shows in Browse. Applies to Category & Provider.</div>
           </div>
+
+          <label className="field-row">
+            <input
+              type="checkbox"
+              checked={marqueeOnly}
+              onChange={() => {
+                setMarqueeOnly(!marqueeOnly);
+                setNote(null);
+              }}
+            />
+            <span>
+              List marquee models only
+              <span className="key-info-hint" style={{ display: 'block' }}>
+                fal's marquee video models and best image models. Untick to browse every image and
+                video model. Other tools and your favourites always show.
+              </span>
+            </span>
+          </label>
 
           <span className="label">Categories</span>
           <div className="schema-form">

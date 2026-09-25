@@ -181,7 +181,12 @@ const EXTRA_TASKS: Array<{ match: RegExp; task: string; apply: Partial<FalModel>
 // read it; persisted separately (storage.getCatalogFilter) and pushed in on app
 // start / when Settings saves. Training et al. are hidden by *choice*, not code.
 // ---------------------------------------------------------------------------
-export type CatalogFilter = { providers: string[] | null; categories: string[] | null };
+export type CatalogFilter = {
+  providers: string[] | null;
+  categories: string[] | null;
+  /** Show only MARQUEE_MODELS among image and video models. Absent = on. */
+  marqueeOnly?: boolean;
+};
 
 // Media categories shown by default once the full fal catalog is synced. The
 // long tail (Training, LLM, Vision, Speech to Text, Audio to Audio) is hidden
@@ -204,7 +209,64 @@ export const DEFAULT_MEDIA_CATEGORIES = [
   'Video to Audio',
   'Video editing',
 ];
-export const DEFAULT_CATALOG_FILTER: CatalogFilter = { providers: null, categories: DEFAULT_MEDIA_CATEGORIES };
+export const DEFAULT_CATALOG_FILTER: CatalogFilter = {
+  providers: null,
+  categories: DEFAULT_MEDIA_CATEGORIES,
+  marqueeOnly: true,
+};
+
+// ---------------------------------------------------------------------------
+// Marquee models: fal's own shortlist ("Marquee video models" and "Best image
+// models" on fal.ai/explore), which is what a newcomer should see first
+// instead of 1,500 endpoints. fal's metadata has no flag for it — `highlighted`
+// and `pinned` are false on every model, and `group.key` is missing for some
+// (PixVerse V6, FIBO Gen) and split four ways for others (Kling 3.0) — so this
+// one list is hand-kept. Each pattern names a model *family* by endpoint
+// prefix, so every task variant (text-, image-, reference-to-video, edit…)
+// comes along and a new task fal adds under the same prefix needs no change.
+//
+// Only the `image` and `video` capabilities are narrowed. Everything with a
+// bespoke screen (segment, merge, 3D, audio, rig…) is untouched, favourites
+// bypass the filter, and findModel still searches the whole catalog, so a
+// recipe that names a long-tail model keeps working.
+// ---------------------------------------------------------------------------
+export const MARQUEE_MODELS: ReadonlyArray<{ name: string; match: RegExp }> = [
+  // Video
+  { name: 'Seedance 2.5', match: /^bytedance\/seedance-2\.5\// },
+  { name: 'Seedance 2.0', match: /^bytedance\/seedance-2\.0\// },
+  { name: 'Gemini Omni', match: /^google\/gemini-omni-flash\// },
+  { name: 'MiniMax H3', match: /^minimax\/h3(-max|-max-turbo)?\// },
+  { name: 'Kling 3.0', match: /^fal-ai\/kling-video\/[vo]3\// },
+  { name: 'Veo 3.1', match: /^fal-ai\/veo3\.1\// },
+  { name: 'Grok Imagine 1.5', match: /^xai\/grok-imagine-video\/v1\.5\// },
+  { name: 'Happy Horse 1.1', match: /^alibaba\/happy-horse\/v1\.1\// },
+  // Listed on fal's marquee page but not yet in the public catalog (25 Sep
+  // 2026); this starts matching whenever fal publishes the endpoint.
+  { name: 'Happy Oyster', match: /happy-oyster/ },
+  { name: 'Wan 3.0', match: /^alibaba\/wan-3\.0(-prime)?\// },
+  { name: 'LTX 2.3', match: /^fal-ai\/ltx-2\.3\// },
+  { name: 'PixVerse V6', match: /^fal-ai\/pixverse\/v6\// },
+  // Image
+  { name: 'GPT Image 2', match: /^openai\/gpt-image-2(\/|$)/ },
+  { name: 'Nano Banana Pro', match: /^fal-ai\/nano-banana-pro(\/|$)/ },
+  { name: 'Nano Banana 2', match: /^fal-ai\/nano-banana-2(\/|$)/ },
+  { name: 'Recraft V4', match: /^fal-ai\/recraft\/v4\// },
+  { name: 'Recraft V3', match: /^fal-ai\/recraft\/v3\// },
+  { name: 'Bria FIBO Gen 1.5', match: /^bria\/fibo-gen-1\.5\// },
+  { name: 'ImagineArt 2.0', match: /^imagineart\/imagineart-2\.0(-edit)?-preview\// },
+  { name: 'FLUX.1 Krea LoRA', match: /^fal-ai\/flux-krea-lora(\/|$)/ },
+  // [pro] only: the [max] variants share the prefix.
+  { name: 'FLUX.1 Kontext [pro]', match: /^fal-ai\/flux-pro\/kontext(\/(text-to-image|multi))?$/ },
+];
+
+export function isMarquee(endpointId: string): boolean {
+  return MARQUEE_MODELS.some((m) => m.match.test(endpointId));
+}
+
+/** Whether the marquee filter applies to this model at all. */
+function marqueeScoped(m: FalModel): boolean {
+  return m.capability === 'image' || m.capability === 'video';
+}
 
 let activeFilter: CatalogFilter = DEFAULT_CATALOG_FILTER;
 const catalogListeners = new Set<() => void>();
@@ -290,6 +352,9 @@ export function enabledModels(): FalModel[] {
   if (activeFilter.categories) {
     const allow = new Set(activeFilter.categories);
     list = list.filter((m) => allow.has(categoryOf(m)));
+  }
+  if (activeFilter.marqueeOnly !== false) {
+    list = list.filter((m) => !marqueeScoped(m) || isMarquee(m.endpointId));
   }
   return list;
 }

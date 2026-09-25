@@ -16,6 +16,11 @@ import {
   categoryOf,
   providerOf,
   DEFAULT_MEDIA_CATEGORIES,
+  DEFAULT_CATALOG_FILTER,
+  isMarquee,
+  enabledModels,
+  setActiveModels,
+  setActiveCatalogFilter,
   type SyncedMeta,
   type FalModel,
 } from './falCatalog';
@@ -315,5 +320,83 @@ describe('mergeSyncedCatalog — ad to layers', () => {
     expect(m.capability).toBe('data');
     expect(m.screen).toBe('generic');
     expect(m.category).toBe('Image To Json');
+  });
+});
+
+// The marquee shortlist is prefix patterns over a catalog we don't control.
+// A pattern that's too loose floods a newcomer's list with siblings (Kontext
+// [max], GPT Image 2.5, Nano Banana 2 Lite); one that's too tight hides a
+// task variant. Both fail silently, so pin both edges.
+describe('marquee models', () => {
+  it.each([
+    'bytedance/seedance-2.5/reference-to-video',
+    'bytedance/seedance-2.0/fast/image-to-video',
+    'google/gemini-omni-flash/v1.1/image-to-video',
+    'minimax/h3-max/reference-to-video',
+    'minimax/h3/reference-to-video',
+    'fal-ai/kling-video/v3/pro/image-to-video',
+    'fal-ai/kling-video/o3/pro/reference-to-video',
+    'fal-ai/veo3.1/first-last-frame-to-video',
+    'xai/grok-imagine-video/v1.5/reference-to-video',
+    'alibaba/happy-horse/v1.1/reference-to-video',
+    'alibaba/wan-3.0-prime/reference-to-video',
+    'fal-ai/ltx-2.3/image-to-video',
+    'fal-ai/pixverse/v6/transition',
+    'openai/gpt-image-2',
+    'openai/gpt-image-2/edit',
+    'fal-ai/nano-banana-pro/edit',
+    'fal-ai/nano-banana-2',
+    'fal-ai/recraft/v4/pro/text-to-image',
+    'fal-ai/recraft/v3/image-to-image',
+    'bria/fibo-gen-1.5/text-to-image',
+    'imagineart/imagineart-2.0-edit-preview/image-to-image',
+    'fal-ai/flux-krea-lora',
+    'fal-ai/flux-pro/kontext',
+    'fal-ai/flux-pro/kontext/multi',
+  ])('claims %s', (id) => {
+    expect(isMarquee(id)).toBe(true);
+  });
+
+  it.each([
+    'openai/gpt-image-2.5/sunburst/edit',
+    'google/nano-banana-2-lite',
+    'fal-ai/flux-pro/kontext/max',
+    'fal-ai/flux-pro/kontext/max/multi',
+    'xai/grok-imagine-video/image-to-video',
+    'alibaba/happy-horse/image-to-video',
+    'fal-ai/ltx-2.3-22b/image-to-video',
+    'fal-ai/recraft/v4.1/text-to-image',
+    'imagineart/imagineart-1.5-preview/text-to-image',
+    'fal-ai/flux/dev',
+  ])('does not claim %s', (id) => {
+    expect(isMarquee(id)).toBe(false);
+  });
+
+  it('narrows only image and video, and turns off cleanly', () => {
+    const models = mergeSyncedCatalog([
+      meta('fal-ai/nano-banana-2', 'text-to-image'),
+      meta('fal-ai/flux/dev', 'text-to-image'),
+      meta('fal-ai/veo3.1/image-to-video', 'image-to-video'),
+      meta('fal-ai/kling-video/v2.1/pro/image-to-video', 'image-to-video'),
+      meta('fal-ai/sam-3/image', 'image-to-image'),
+    ]);
+    setActiveModels(models);
+    const ids = () => enabledModels().map((m) => m.endpointId).sort();
+    try {
+      setActiveCatalogFilter({ ...DEFAULT_CATALOG_FILTER });
+      // SAM routes to the segment screen, so marquee never hides it.
+      expect(ids()).toEqual(['fal-ai/nano-banana-2', 'fal-ai/sam-3/image', 'fal-ai/veo3.1/image-to-video']);
+      setActiveCatalogFilter({ ...DEFAULT_CATALOG_FILTER, marqueeOnly: false });
+      expect(ids()).toHaveLength(5);
+    } finally {
+      setActiveCatalogFilter(DEFAULT_CATALOG_FILTER);
+      setActiveModels([]);
+    }
+  });
+
+  it('is on for a saved filter from before the tickbox existed', () => {
+    // storage.getCatalogFilter spreads a stored filter over the default, so an
+    // older one with no marqueeOnly key inherits the default. Guard the default.
+    expect(DEFAULT_CATALOG_FILTER.marqueeOnly).toBe(true);
   });
 });
