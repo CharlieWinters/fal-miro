@@ -369,6 +369,22 @@ function embedPageUrl(page: string, assetUrl: string): string {
   return `${frontendPageUrl(page)}?url=${encodeURIComponent(assetUrl)}&cb=${cb}`;
 }
 
+/**
+ * An embed node's page. Carries only the node's id plus the cache-buster —
+ * the URL is frozen board content readable by anyone with board access, so
+ * nothing secret and nothing that could go stale belongs in it. Everything
+ * else is read from the embed's metadata by the headless iframe.
+ */
+export function nodePageUrl(nid: string): string {
+  const cb = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  return `${frontendPageUrl('node.html')}?nid=${encodeURIComponent(nid)}&cb=${cb}`;
+}
+
+/** The generic poster a node shows on the board before its first result. */
+export function nodePosterUrl(): string {
+  return frontendPageUrl('node-poster.png');
+}
+
 /** URL to the static page that wraps a Fal video URL in an iframable player. */
 export function videoEmbedUrl(videoUrl: string): string {
   return embedPageUrl('embed-video.html', videoUrl);

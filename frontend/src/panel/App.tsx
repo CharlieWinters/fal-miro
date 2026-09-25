@@ -38,6 +38,9 @@ import { getCatalogFilter, getFavourites } from '../shared/storage';
 import { getConnectedResources, getParentFrameId } from '../shared/boardHelpers';
 import { buildRecipeSeed, type RecipeCard, type RecipeSeed } from '../shared/recipeCard';
 import { loadBackendConfig } from '../shared/backendConfig';
+import { isOurs } from '../shared/frameMessaging';
+import { NODE_MSG } from '../shared/node';
+import { readNode } from '../shared/nodeBoard';
 import { api } from '../lib/api';
 import '../styles/index.css';
 
@@ -225,6 +228,44 @@ function App() {
     setModel(target);
   };
 
+  // Open on an embed node: the node's recipe is a settings card's recipe, and
+  // its connectors are the node's own, so this is openRecipe with the node's
+  // embed id standing in for the card id (output then lands beside the node).
+  const openNode = async (embedId: string) => {
+    const node = await readNode(embedId);
+    if (!node) {
+      console.warn('[App] asked to open a node that is not on the board', embedId);
+      return;
+    }
+    setShowSettings(false);
+    setOpenApp(null);
+    await openRecipe(node.meta.recipe, embedId);
+  };
+
+  // Two ways a node reaches this panel. Opened fresh by the headless bridge,
+  // the node's id is in the URL. Already open, the bridge sends a focus
+  // message instead (same origin only — see frameMessaging).
+  const [pendingNode, setPendingNode] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('node'),
+  );
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (!isOurs(event)) return;
+      const d = event.data as { type?: string; embedId?: unknown } | null;
+      if (d?.type === NODE_MSG.focus && typeof d.embedId === 'string') setPendingNode(d.embedId);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+  useEffect(() => {
+    // Wait for the catalog so the node's model resolves to its real screen.
+    if (!pendingNode || !backendReady || !catalogReady) return;
+    setPendingNode(null);
+    void openNode(pendingNode);
+    // openNode only reads state setters, which are stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingNode, backendReady, catalogReady]);
+
   // No backend configured in this browser yet — the only thing this iframe
   // can do is let the user set one. No back button: there's nowhere to go.
   if (!backendReady) {
@@ -286,6 +327,7 @@ function App() {
             onOpenScene={openSceneModal}
             onOpenSettings={() => setShowSettings(true)}
             onOpenRecipe={(recipe, cardId) => void openRecipe(recipe, cardId)}
+            onOpenNode={(embedId) => void openNode(embedId)}
           />
         )}
       </div>

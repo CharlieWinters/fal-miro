@@ -56,3 +56,47 @@ function siblingFrames(): FrameLike[] {
   }
   return out;
 }
+
+/**
+ * Deliver `message` to every frame on the board page, at our own origin only.
+ *
+ * postToSiblings reaches the app's own iframes, which sit directly under the
+ * board page. Embed widgets are nested deeper, so a nudge meant for an embed
+ * node has to walk the whole tree — `length` and indexed access are on the
+ * cross-origin allowlist, so the walk works from here. The browser drops the
+ * message for any frame that isn't on our origin, so nothing leaks to other
+ * apps' frames; the node page ignores anything it didn't expect.
+ */
+export function postToAllFrames(message: unknown): void {
+  const targets: Window[] = [];
+  const collect = (win: Window, depth: number): void => {
+    if (depth > 8 || targets.length > 200) return;
+    targets.push(win);
+    let n = 0;
+    try {
+      n = win.length;
+    } catch {
+      return;
+    }
+    for (let i = 0; i < n; i++) {
+      try {
+        collect(win[i] as Window, depth + 1);
+      } catch {
+        /* a frame we cannot index into */
+      }
+    }
+  };
+  try {
+    collect(window.top ?? window.parent, 0);
+  } catch {
+    return;
+  }
+  const origin = ownOrigin();
+  for (const win of targets) {
+    try {
+      win.postMessage(message, origin);
+    } catch {
+      /* detached or mid-navigation */
+    }
+  }
+}
