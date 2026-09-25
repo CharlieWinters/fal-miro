@@ -1,3 +1,4 @@
+import { recordNodeOutput } from '../../../shared/nodeBoard';
 import { api, videoEmbedUrl, type StatusResponse } from '../../../lib/api';
 import {
   createEmbedAtPosition,
@@ -393,13 +394,14 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
     const embedY = abs?.absoluteY ?? targetY;
 
     await deleteItem(placeholderId);
+    const posterUrl = await resolveVideoPoster(outputUrl, sourceUrl);
     const embed = await createEmbedAtPosition({
       url: videoEmbedUrl(outputUrl),
       x: embedX,
       y: embedY,
       width,
       height,
-      previewUrl: await resolveVideoPoster(outputUrl, sourceUrl),
+      previewUrl: posterUrl,
     });
     // Bill by elapsed compute time: Fal's reported inference time if present,
     // else the wall-clock run time we measured, else the requested duration.
@@ -409,6 +411,8 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
     settings.costUSD = await estimateCostUSD(endpointId, { units: 1, seconds: billedSeconds });
     await setItemGenerationSettings(embed.id, settings);
     await removeActiveJob(falRequestId);
+    // Started from an embed node? Then the node shows this result from now on.
+    await recordNodeOutput(cardAnchorId, { url: outputUrl, kind: 'video', ...(posterUrl ? { posterUrl } : {}) });
     return { requestId: falRequestId, embedItemId: embed.id, outputUrl };
   }
 

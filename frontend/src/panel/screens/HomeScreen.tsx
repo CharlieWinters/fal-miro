@@ -30,6 +30,7 @@ import { setSceneInputs } from '../../shared/storage';
 import { toneOf, toneFill, toneOutline } from '../../shared/capabilityTone';
 import { CapabilityIcon } from '../CapabilityIcon';
 import { listRecipeCards, parseRecipeCard, type RecipeCard, type RecipeCardRef } from '../../shared/recipeCard';
+import { convertCardToNode } from '../../shared/nodeBoard';
 import { applyMotionToCharacter, pickMotionAndRig } from '../applyMotion';
 
 /** "→ Image" capture utilities that open in the modal for a large view. */
@@ -188,6 +189,7 @@ export function HomeScreen({
   onOpenScene,
   onOpenSettings,
   onOpenRecipe,
+  onOpenNode,
   onOpenApp,
   browseMode,
   onBrowseModeChange,
@@ -198,6 +200,8 @@ export function HomeScreen({
   onOpenScene: () => void;
   onOpenSettings: () => void;
   onOpenRecipe: (recipe: RecipeCard, cardId: string) => void;
+  /** Opens the model screen on an embed node (see shared/node.ts). */
+  onOpenNode?: (embedId: string) => void;
   /** Opens a bespoke pipeline-app screen (Browse ▸ Apps) by its pipelineApps.ts id. */
   onOpenApp?: (appId: string) => void;
   /** Which Browse tab is showing. Owned by App so it survives opening an app
@@ -308,8 +312,27 @@ export function HomeScreen({
   const drillTitle = drill?.value ?? '';
   const drillCount = drilledFamilies.length;
 
+  // Embed nodes. A node's url is readonly board content, so this only says
+  // "looks like a node"; readNode (on open) checks the metadata that decides.
+  const selectedNodeId = selectedEmbed?.url && /\/node\.html\?/.test(selectedEmbed.url) ? selectedEmbed.id : null;
+  const [convertNote, setConvertNote] = useState<string | null>(null);
+  const [converting, setConverting] = useState(false);
+  const convertToNode = async (cardId: string) => {
+    setConverting(true);
+    setConvertNote(null);
+    try {
+      await convertCardToNode(cardId);
+      setConvertNote('Converted. The node is where the card was, with its connections.');
+    } catch (e) {
+      setConvertNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setConverting(false);
+    }
+  };
+
   const hasSelectionZone =
     Boolean(selectedRecipe) ||
+    Boolean(selectedNodeId) ||
     (Boolean(selectedEmbed) &&
       (has3dViewerSelected || hasVideoSelected || hasPanoramaSelected || hasRigSelected || hasMotionSelected || Boolean(motionAndRig) || sceneAssets.length >= 1));
 
@@ -333,6 +356,25 @@ export function HomeScreen({
               onOpen={() => onOpenRecipe(selectedRecipe, selectedCard.id)}
             />
           )}
+          {selectedRecipe && selectedCard && (
+            <ToolCard
+              capability={selectedRecipe.capability}
+              title={converting ? 'Converting…' : 'Convert to node'}
+              sub="Replace this card with a node: same settings and connections, opens from the board"
+              onOpen={() => {
+                if (!converting) void convertToNode(selectedCard.id);
+              }}
+            />
+          )}
+          {selectedNodeId && onOpenNode && (
+            <ToolCard
+              capability="video"
+              title="Open node"
+              sub="Load this node's settings and connected references"
+              onOpen={() => onOpenNode(selectedNodeId)}
+            />
+          )}
+          {convertNote && <div className="notice">{convertNote}</div>}
           {selectedEmbed && has3dViewerSelected && (
             <ToolCard
               capability="model3d"

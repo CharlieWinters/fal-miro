@@ -1,3 +1,4 @@
+import { recordNodeOutput } from '../../../shared/nodeBoard';
 import { api, type StatusResponse } from '../../../lib/api';
 import {
   createImageAtAbsolute,
@@ -306,6 +307,8 @@ export async function run(payload: unknown, requestId = ''): Promise<ImageGenRes
     settings.costUSD = await estimateCostUSD(endpointId, { units: Number(finalInput.num_images) || 1 });
     await setItemGenerationSettings(placeholderId, settings);
     await removeActiveJob(falRequestId);
+    // Started from an embed node? Then the node shows this result from now on.
+    await recordNodeOutput(cardAnchorId, { url: outputUrl, kind: 'image' });
     return { requestId: falRequestId, imageItemId: placeholderId, outputUrl };
   }
 

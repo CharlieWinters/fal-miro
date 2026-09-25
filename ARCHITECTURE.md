@@ -394,6 +394,39 @@ download URL directly. The item metadata endpoint sends
 the app stays Flavor 3.
 
 
+## Embed nodes (prototype)
+
+A node is an embed widget pointing at `node.html?nid=<uuid>&cb=<cache-buster>`
+that replaces a settings card on the board. The card's recipe moves, unchanged,
+into the embed's app metadata under `fal-node` (6 KB per item, readable only by
+people with the app installed, kept when a board is copied). References and a
+wired prompt sticky are still read from the node's connectors and frame, exactly
+as for cards.
+
+- **Made by the app, never by the Miro MCP.** An MCP-authored embed stores an
+  empty `url` (verified 25 Sep 2026), so Claude keeps writing settings cards and
+  the panel's *Convert to node* turns one into a node in place: same top-left
+  corner and frame, connectors recreated on the node, then the card deleted.
+- **node.html has no SDK.** It walks the page's frames and posts
+  `fal-node:hello {nid}` at our own origin; `headless/nodeBridge.ts` answers
+  with state read from the board. Nobody answering means the viewer lacks the
+  app, and the page says so. This is miro-terminal's embed-to-app pattern.
+- **Generate runs from the node.** The bridge accepts `hello`, `open` and
+  `generate`, each carrying only a UUID nid. `generate` rebuilds the run from
+  the node's board state (`shared/nodeRun.ts`, same payload builder as the
+  panel's reference-to-video screen) and posts RUN_AGENT like the panel does,
+  so a message can trigger a node's run but can't choose what runs. A node
+  already generating refuses a second run. There is deliberately no confirm
+  step: `charliewinters.github.io` is shared by every Pages repo on the
+  account, but the panel's RUN_AGENT already trusts every frame on that
+  origin, so a confirm modal here guarded little.
+- **After a run** started from a node, the image and video agents write
+  `lastOutput` to the node and set its `previewUrl` to the result, then nudge
+  the node to refresh. Before the first run the node shows `node-poster.png`.
+
+Pure logic (protocol parsing, metadata validation, state) is `shared/node.ts`
+and is unit-tested; board operations are `shared/nodeBoard.ts`.
+
 ## What's NOT built yet (next milestones)
 
 - **Text-output pipeline steps** — see the "URL outputs only" limitation above.

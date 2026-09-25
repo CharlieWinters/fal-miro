@@ -1,5 +1,6 @@
 import { initializeMessageListener } from './communications';
 import { agentRegistry } from './agentRegistry';
+import { initNodeBridge } from './nodeBridge';
 import { run as resumeActiveJobs } from '../agents/resume_jobs/headless/logic';
 import { loadBackendConfig, watchBackendConfig } from '../shared/backendConfig';
 
@@ -7,6 +8,8 @@ async function init(): Promise<void> {
   // Wire the agents into the message listener. This is the composition root:
   // the only place that knows both the full agent list and the transport.
   initializeMessageListener(agentRegistry);
+  // Answers embed nodes on the board (node.html) — works with the panel closed.
+  initNodeBridge();
 
   // Open the panel when the user clicks the app icon in the Miro toolbar.
   await miro.board.ui.on('icon:click', async () => {
