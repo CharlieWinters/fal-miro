@@ -15,6 +15,7 @@ import {
   parseFalInputSchema,
   defaultsFor,
   pickPromptField,
+  pickAudioReferenceField,
   pickReferenceField,
   pickVideoReferenceField,
   type Field,
@@ -35,8 +36,9 @@ const PROMPT_FALLBACK: Field[] = [{ name: 'prompt', label: 'Prompt', kind: 'text
 /**
  * Catch-all model screen for endpoints without a bespoke screen. Builds its form
  * from the live schema and auto-wires the shared board inputs: the primary image
- * field ← selected image(s), the prompt ← selected stickies. Output (image /
- * video / 3D / link) is placed by the fal_generic agent.
+ * field ← selected image(s), the video and audio fields ← their baskets, the
+ * prompt ← selected stickies. Output (image / video / 3D / link) is placed by
+ * the fal_generic agent.
  */
 export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: RecipeSeed | null }) {
   const [schema, setSchema] = useState<SchemaState>({ status: 'loading' });
@@ -48,6 +50,7 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
   const boardSel = useBoardSelection();
   const imageBasket = useBasket('image', boardSel);
   const videoBasket = useBasket('video', boardSel);
+  const audioBasket = useBasket('audio', boardSel);
   const noteBasket = useBasket('note', boardSel);
   const [promptText, setPromptText] = useState('');
   const fullPrompt = assemblePrompt(noteBasket, promptText);
@@ -58,6 +61,7 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
     if (!seed) return;
     imageBasket.replace(seed.images);
     videoBasket.replace(seed.videos);
+    audioBasket.replace(seed.audios);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.token]);
 
@@ -91,13 +95,17 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
   const promptField = useMemo(() => pickPromptField(fields), [fields]);
   const referenceField = useMemo(() => pickReferenceField(fields), [fields]);
   const videoReferenceField = useMemo(() => pickVideoReferenceField(fields), [fields]);
+  const audioReferenceField = useMemo(() => pickAudioReferenceField(fields), [fields]);
   const multiImage = Boolean(referenceField?.multiple);
   const multiVideo = Boolean(videoReferenceField?.multiple);
+  const multiAudio = Boolean(audioReferenceField?.multiple);
 
   // A single-value field sends the first basket item; the basket shows the rest.
   const refImageIds = (multiImage ? imageBasket.items : imageBasket.items.slice(0, 1)).map((i) => i.id);
 
   const refVideoIds = (multiVideo ? videoBasket.items : videoBasket.items.slice(0, 1)).map((v) => v.id);
+
+  const refAudioIds = (multiAudio ? audioBasket.items : audioBasket.items.slice(0, 1)).map((a) => a.id);
 
   // The frame the current references came from, if any — live selection wins,
   // else falls back to the reopened card's own frame. Lets the output place
@@ -123,12 +131,16 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
   const blockReason: string | null = (() => {
     if (imageBasket.hasMissing) return 'An image in the basket is no longer on the board — remove it first.';
     if (videoBasket.hasMissing) return 'A video in the basket is no longer on the board — remove it first.';
+    if (audioBasket.hasMissing) return 'An audio clip in the basket is no longer on the board — remove it first.';
     if (noteBasket.hasMissing) return 'A sticky note in the prompt is no longer on the board — remove it first.';
     if (referenceField?.required && refImageIds.length === 0) {
       return `Add ${multiImage ? 'one or more images' : 'an image'} to the ${multiImage ? 'Images' : 'Image'} basket first — select on the board, then press Add.`;
     }
     if (videoReferenceField?.required && refVideoIds.length === 0) {
       return `Add ${multiVideo ? 'one or more Fal videos' : 'a Fal video'} to the ${multiVideo ? 'Videos' : 'Video'} basket first — select on the board, then press Add.`;
+    }
+    if (audioReferenceField?.required && refAudioIds.length === 0) {
+      return `Add ${multiAudio ? 'one or more Fal audio clips' : 'a Fal audio clip'} to the Audio basket first — select on the board, then press Add.`;
     }
     if (promptField?.required && !fullPrompt.trim()) {
       return 'Type a prompt, or add sticky notes to the prompt basket.';
@@ -169,6 +181,9 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
         ...(videoReferenceField && refVideoIds.length
           ? { videoFields: [{ field: videoReferenceField.name, itemIds: refVideoIds, multiple: multiVideo }] }
           : {}),
+        ...(audioReferenceField && refAudioIds.length
+          ? { audioFields: [{ field: audioReferenceField.name, itemIds: refAudioIds, multiple: multiAudio }] }
+          : {}),
         ...(seed ? { cardAnchorId: seed.cardId } : {}),
         ...(referenceFrameId ? { referenceFrameId } : {}),
       },
@@ -199,7 +214,7 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
       videoReferenceField: videoReferenceField ?? null,
     };
 
-    const connectIds = [...refImageIds, ...refVideoIds];
+    const connectIds = [...refImageIds, ...refVideoIds, ...refAudioIds];
     connectIds.push(...noteBasket.items.map((n) => n.id));
 
     // A selected frame's contents count as connected too.
@@ -211,6 +226,7 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
         connectIds.push(
           ...expanded.images.map((i) => i.id),
           ...expanded.videos.map((v) => v.id),
+          ...expanded.audios.map((a) => a.id),
           ...expanded.stickies.map((s) => s.id),
         );
       }
@@ -265,12 +281,21 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
             />
           )}
 
+          {audioReferenceField && (
+            <BasketPanel
+              basket={audioBasket}
+              title={multiAudio ? 'Audio references' : 'Audio'}
+              cap={multiAudio ? undefined : 1}
+              onInsertToken={(t) => setPromptText((p) => (p && !/\s$/.test(p) ? `${p} ${t}` : p + t))}
+            />
+          )}
+
           {promptField && (
             <PromptBasket
               basket={noteBasket}
               text={promptText}
               onTextChange={setPromptText}
-              counts={{ Image: imageBasket.items.length, Video: videoBasket.items.length, Audio: 0 }}
+              counts={{ Image: imageBasket.items.length, Video: videoBasket.items.length, Audio: audioBasket.items.length }}
             />
           )}
 
@@ -282,6 +307,7 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
             hide={[
               ...(referenceField ? [referenceField.name] : []),
               ...(videoReferenceField ? [videoReferenceField.name] : []),
+              ...(audioReferenceField ? [audioReferenceField.name] : []),
               // A live mode renders the prompt itself, framed and read-only.
               ...(promptField ? [promptField.name] : []),
             ]}
