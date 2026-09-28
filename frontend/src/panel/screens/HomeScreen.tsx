@@ -5,6 +5,7 @@ import {
   enabledModels,
   familiesByCategory,
   familiesByProvider,
+  familyOf,
   findModel,
   providerOf,
   providersPresent,
@@ -108,6 +109,28 @@ function ToolCard({
   );
 }
 
+/** Favourite toggle for a family. Favourites are per family, so starring any
+ *  task in search favourites the whole model. */
+function FavStar({ familyKey }: { familyKey: string }) {
+  const fav = isFavourite(familyKey);
+  return (
+    <button
+      type="button"
+      className={`fav-star ${fav ? 'on' : ''}`}
+      aria-label={fav ? `Unfavourite ${familyKey}` : `Favourite ${familyKey}`}
+      aria-pressed={fav}
+      title={fav ? `Remove ${familyKey} from favourites` : `Add ${familyKey} to favourites`}
+      onClick={(e) => {
+        e.stopPropagation();
+        toggleFavourite(familyKey);
+      }}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      {fav ? '★' : '☆'}
+    </button>
+  );
+}
+
 /** A model row used in search results — a single task, selected directly. */
 function ModelRow({ model, onSelect }: { model: FalModel; onSelect: (m: FalModel) => void }) {
   return (
@@ -126,6 +149,7 @@ function ModelRow({ model, onSelect }: { model: FalModel; onSelect: (m: FalModel
         </div>
         <div className="card-sub">{model.endpointId}</div>
       </div>
+      <FavStar familyKey={familyOf(model)} />
     </div>
   );
 }
@@ -142,7 +166,6 @@ function FamilyRow({
 }) {
   const tone = toneOf(family.capabilities[0]);
   const sub = showProvider ? family.provider : family.categories.join(' · ');
-  const fav = isFavourite(family.key);
   return (
     <div
       className="card"
@@ -160,19 +183,7 @@ function FamilyRow({
       <span className="count-pill">
         {family.tasks.length} task{family.tasks.length === 1 ? '' : 's'}
       </span>
-      <button
-        type="button"
-        className={`fav-star ${fav ? 'on' : ''}`}
-        aria-label={fav ? 'Unfavourite' : 'Favourite'}
-        aria-pressed={fav}
-        title={fav ? 'Remove from favourites' : 'Add to favourites'}
-        onClick={(e) => {
-          e.stopPropagation();
-          toggleFavourite(family.key);
-        }}
-      >
-        {fav ? '★' : '☆'}
-      </button>
+      <FavStar familyKey={family.key} />
     </div>
   );
 }
