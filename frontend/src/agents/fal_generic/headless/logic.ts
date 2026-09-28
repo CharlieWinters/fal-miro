@@ -2,6 +2,7 @@ import { api, type StatusResponse } from '../../../lib/api';
 import {
   createImageAtAbsolute,
   createImageBelow,
+  getAudioRef,
   getImageAspectRatio,
   getImageRef,
   getVideoRef,
@@ -41,6 +42,8 @@ export type GenericGenPayload = {
   imageFields?: Array<{ field: string; itemIds: string[]; multiple: boolean }>;
   /** Board Fal-video embeds to resolve into named schema fields (URLs, in order). */
   videoFields?: Array<{ field: string; itemIds: string[]; multiple: boolean }>;
+  /** Board Fal-audio embeds to resolve into named schema fields (URLs, in order). */
+  audioFields?: Array<{ field: string; itemIds: string[]; multiple: boolean }>;
   /** Sticky driving the prompt/placement (optional; for lineage). */
   stickyId?: string;
   placeholderRatio?: string;
@@ -67,6 +70,7 @@ export async function run(payload: unknown, requestId = ''): Promise<GenericGenR
     input = {},
     imageFields = [],
     videoFields = [],
+    audioFields = [],
     stickyId,
     placeholderRatio,
     cardAnchorId,
@@ -114,9 +118,36 @@ export async function run(payload: unknown, requestId = ''): Promise<GenericGenR
     }
   }
 
+  // Resolve board Fal-audio embeds into their schema fields (array or single URL).
+  // An audio embed's shape says nothing about the output's ratio, so it only
+  // anchors placement when nothing else does (e.g. audio-only models).
+  let audioAnchorId: string | undefined;
+  if (audioFields.length) {
+    broadcastUpdate({ requestId, status: 'queued', message: 'Reading board audio…' });
+    for (const f of audioFields) {
+      const urls: string[] = [];
+      for (const id of f.itemIds) {
+        // A pasted URL sits in the basket with the URL as its id (see
+        // basket.addUrl) — there is no board item to read, so send it as-is.
+        if (/^https?:\/\//i.test(id)) {
+          urls.push(id);
+          continue;
+        }
+        const r = await getAudioRef(id);
+        if (r) {
+          urls.push(r.url);
+          parents.add(id);
+          if (!audioAnchorId) audioAnchorId = id;
+        }
+      }
+      if (urls.length) finalInput[f.field] = f.multiple ? urls : urls[0];
+    }
+  }
+
   let ratio = placeholderRatio;
   if (!ratio && anchorId) ratio = (await getImageAspectRatio(anchorId)) ?? undefined;
   if (!ratio) ratio = '1:1';
+  if (!anchorId) anchorId = audioAnchorId;
 
   // If the references came from a frame, that frame takes placement priority:
   // the output goes directly below it, sized to match its width.
