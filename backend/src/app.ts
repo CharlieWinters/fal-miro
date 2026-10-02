@@ -8,6 +8,10 @@ import { logBox, summarizeInput } from './lib/logging.js';
 import { extractOutputUrls, normalizeStatus } from './lib/output.js';
 import { falError, messageOf } from './lib/errors.js';
 import { jsonResponse } from './lib/http.js';
+import { REALTIME_PROXY_MAX_BYTES, checkRealtimeTarget } from './lib/realtimeProxy.js';
+
+/** fal's client-proxy header naming the real destination of a proxied request. */
+const TARGET_URL_HEADER = 'x-fal-target-url';
 
 // Runtime-agnostic Hono app — the same routes/logic run on Node
 // (src/node.ts) and Cloudflare Workers (src/worker.ts). The FAL_KEY lives
@@ -27,7 +31,8 @@ app.use(
       return allowedOrigins.includes(origin) ? origin : null;
     },
     allowMethods: ['GET', 'POST'],
-    allowHeaders: ['Content-Type', 'x-fal-proxy-key'],
+    // x-fal-target-url: the realtime proxy's destination (fal's proxy protocol)
+    allowHeaders: ['Content-Type', 'x-fal-proxy-key', 'x-fal-target-url'],
   }),
 );
 
@@ -212,6 +217,45 @@ app.get('/proxy', async (c) => {
 
   // Return a raw Response (rather than c.body()) — upstream.status is a
   // runtime number, not one of Hono's compile-time status literals.
+  return new Response(upstream.body, { status: upstream.status, headers });
+});
+
+// ---------------------------------------------------------------------------
+// Realtime proxy — fal's client-proxy protocol, for WebRTC (WMA) sessions.
+//
+// embed-director.html opens a live session with @fal-ai/client's
+// fal.realtime.open(wma(...)) and `proxyUrl` pointed here, so the browser never
+// holds FAL_KEY. Each request names its real destination in x-fal-target-url;
+// lib/realtimeProxy.ts holds that to the four calls a session makes, for the
+// apps in REALTIME_APPS only. Sits behind the /api/fal/* BACKEND_KEY check.
+// ---------------------------------------------------------------------------
+app.post('/api/fal/realtime-proxy', bodyLimit({ maxSize: REALTIME_PROXY_MAX_BYTES }), async (c) => {
+  const { falKey } = resolveEnv(c);
+  if (!falKey) return c.json({ error: 'This deployment has no FAL_KEY configured.' }, 500);
+
+  const body = await c.req.text();
+  const target = checkRealtimeTarget(c.req.header(TARGET_URL_HEADER), c.req.method, body);
+  if (typeof target === 'string') return c.json({ error: target }, 403);
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(target.url.href, {
+      method: target.method,
+      headers: { Authorization: `Key ${falKey}`, 'Content-Type': 'application/json' },
+      body: body || undefined,
+      // a redirect would take the key somewhere the allowlist never checked
+      redirect: 'manual',
+    });
+  } catch (err) {
+    console.error('[realtime-proxy] upstream error:', messageOf(err));
+    return c.json({ error: messageOf(err) }, 502);
+  }
+  if (upstream.status >= 300 && upstream.status < 400) {
+    return c.json({ error: 'Upstream tried to redirect; not followed' }, 502);
+  }
+  const headers = new Headers();
+  const type = upstream.headers.get('content-type');
+  if (type) headers.set('content-type', type);
   return new Response(upstream.body, { status: upstream.status, headers });
 });
 

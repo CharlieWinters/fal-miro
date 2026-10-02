@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Fal for Miro — Director</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; color: #f4f4f6; overflow: hidden;
+      font: 13px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+    video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+      background: #000; display: block; cursor: pointer; }
+    .hud { position: absolute; left: 10px; bottom: 14px; max-width: calc(100% - 20px);
+      display: flex; gap: 10px; align-items: center; padding: 5px 10px; border-radius: 8px;
+      background: rgba(0, 0, 0, 0.55); font-variant-numeric: tabular-nums; pointer-events: auto; }
+    .hud .label { font-weight: 800; letter-spacing: 0.08em; color: #ffdd33; }
+    .hud .err { color: #f25a6e; white-space: normal; }
+    .hud button { font: inherit; color: #f4f4f6; background: rgba(255, 255, 255, 0.12);
+      border: 0; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+    .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255, 255, 255, 0.12); }
+    .bar > div { height: 100%; width: 0; background: #ffdd33; transition: width 0.25s linear; }
+    .center { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 12px;
+      align-items: center; justify-content: center; text-align: center; padding: 24px; }
+    .center p { margin: 0; max-width: 46ch; color: #c9c9cf; }
+    .center .prompt { max-height: 30%; overflow: hidden; color: #8a8a92; font-size: 12px; }
+    .center button { font: 700 14px system-ui, sans-serif; padding: 10px 22px; border: 0;
+      border-radius: 999px; background: #ffdd33; color: #050505; cursor: pointer; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <!--
+    A live MiniMax H3 Max Director session, as a Miro embed.
+
+    fal.realtime.open(wma(...)) negotiates WebRTC with fal's WMA bridge and the
+    video streams straight from the runner into the <video> below. The page holds
+    no key and takes none in its URL: an embed URL is board content anyone with
+    access can read. It uses THIS viewer's own Fal-for-Miro connection from
+    localStorage (same origin as the app's panel, see shared/backendConfig.ts):
+
+      backend mode → every session call goes through the deployment's
+                     /api/fal/realtime-proxy, which adds FAL_KEY server-side;
+      client mode  → the viewer's own key from that same browser storage.
+
+    Nothing starts until someone presses Start: an embed loads for every viewer
+    of the board, and a live session bills while it runs.
+
+    URL: ?prompt=…&script=[{"offset":0,"prompt":"…"}]&resolution=768p
+         &aspect_ratio=16:9&memory=12&image_url=…&cb=…
+  -->
+  <video id="video" autoplay playsinline muted></video>
+
+  <div id="gate" class="center" hidden>
+    <p id="gate-title"></p>
+    <p id="gate-prompt" class="prompt"></p>
+    <button id="start" type="button">Start live session</button>
+  </div>
+  <div id="fatal" class="center" hidden><p id="fatal-text"></p></div>
+
+  <div id="hud" class="hud" hidden>
+    <span class="label">DIRECTOR</span>
+    <span id="chunk">chunk –</span>
+    <span id="clock">0:00</span>
+    <span id="status"></span>
+    <button id="stop" type="button" title="End the session (stops billing)">Stop</button>
+  </div>
+  <div class="bar" id="bar" hidden><div id="bar-fill"></div></div>
+
+  <script type="module">
+    const CLIENT = 'https://esm.sh/@fal-ai/client@1.11.0-alpha.4';
+    const ENDPOINT = 'minimax/h3-max/director';
+    const CONFIG_KEY = 'fal:backendConfig'; // shared/backendConfig.ts STORAGE_KEY
+
+    const $ = (id) => document.getElementById(id);
+    const video = $('video');
+
+    function fatal(text) {
+      $('fatal-text').textContent = text;
+      $('fatal').hidden = false;
+      $('gate').hidden = true;
+    }
+    function status(text, isError = false) {
+      const s = $('status');
+      s.textContent = text;
+      s.className = isError ? 'err' : '';
+    }
+
+    // ---- parameters --------------------------------------------------------
+    const q = new URLSearchParams(location.search);
+    const prompt = (q.get('prompt') ?? '').trim();
+    const pick = (v, allowed, dflt) => (allowed.includes(v) ? v : dflt);
+    const resolution = pick((q.get('resolution') ?? '').toLowerCase(), ['480p', '768p'], '768p');
+    const aspectRatio = pick(q.get('aspect_ratio') ?? '', ['16:9', '9:16', '1:1'], '16:9');
+    const memoryRaw = Number.parseInt(q.get('memory') ?? '', 10);
+    const memory = Number.isFinite(memoryRaw) ? Math.min(50, Math.max(1, memoryRaw)) : 12;
+    const imageUrl = /^https?:\/\//i.test(q.get('image_url') ?? '') ? q.get('image_url') : null;
+
+    let script = null;
+    let scriptError = null;
+    if (q.get('script')) {
+      try {
+        const parsed = JSON.parse(q.get('script'));
+        if (!Array.isArray(parsed)) throw new Error('script must be a JSON array');
+        script = parsed.map((beat, i) => {
+          const offset = Number(beat?.offset);
+          if (!Number.isFinite(offset) || typeof beat?.prompt !== 'string') {
+            throw new Error(`script[${i}] needs a numeric offset and a prompt`);
+          }
+          return { offset, prompt: beat.prompt };
+        });
+      } catch (e) {
+        scriptError = e instanceof Error ? e.message : String(e);
+      }
+    }
+    // Progress runs to the last beat + 10 s, or a minute with no script.
+    const totalSeconds = script?.length ? Math.max(...script.map((b) => b.offset)) + 10 : 60;
+
+    // ---- connection (this viewer's own, never the URL's) --------------------
+    function readConnection() {
+      try {
+        const cfg = JSON.parse(localStorage.getItem(CONFIG_KEY) ?? 'null');
+        if (cfg?.mode === 'backend' && cfg.url && cfg.key) return { mode: 'backend', url: cfg.url, key: cfg.key };
+        if (cfg?.mode === 'client' && cfg.falKey) return { mode: 'client', falKey: cfg.falKey };
+        if (typeof cfg?.url === 'string' && typeof cfg?.key === 'string') return { mode: 'backend', url: cfg.url, key: cfg.key };
+      } catch { /* storage blocked or corrupt: treated as not connected */ }
+      return null;
+    }
+
+    async function makeClient(conn) {
+      const { createFalClient } = await import(CLIENT);
+      if (conn.mode === 'backend') {
+        const base = conn.url.replace(/\/+$/, '');
+        return createFalClient({
+          proxyUrl: { url: `${base}/api/fal/realtime-proxy`, when: 'always' },
+          requestMiddleware: async (req) => ({
+            ...req,
+            headers: { ...(req.headers ?? {}), 'x-fal-proxy-key': conn.key },
+          }),
+        });
+      }
+      return createFalClient({ credentials: conn.falKey, suppressLocalCredentialsWarning: true });
+    }
+
+    // ---- session -------------------------------------------------------------
+    let session = null;
+    let startedAt = 0;
+    let chunks = 0;
+    let ticker = 0;
+
+    function tick() {
+      if (!startedAt) return;
+      const secs = (Date.now() - startedAt) / 1000;
+      $('clock').textContent = `${Math.floor(secs / 60)}:${String(Math.floor(secs % 60)).padStart(2, '0')}`;
+      $('bar-fill').style.width = `${Math.min(100, (secs / totalSeconds) * 100)}%`;
+    }
+
+    function stop(reason) {
+      clearInterval(ticker);
+      try { session?.close(); } catch { /* already closed */ }
+      session = null;
+      $('stop').hidden = true;
+      if (reason) status(reason);
+    }
+
+    async function start(conn) {
+      $('gate').hidden = true;
+      $('hud').hidden = false;
+      $('bar').hidden = false;
+      // The Start press is the user gesture, so audio can come on with it.
+      video.muted = false;
+      status('connecting…');
+
+      let fal, wma;
+      try {
+        fal = await makeClient(conn);
+        ({ wma } = await import(`${CLIENT}/realtime`));
+      } catch (e) {
+        status(`could not load the fal client: ${e?.message ?? e}`, true);
+        return;
+      }
+
+      try {
+        session = fal.realtime.open(wma(ENDPOINT), {
+          receive: ['video', 'audio'],
+          onMedia(stream) {
+            video.srcObject = stream;
+            video.play().catch(() => {
+              // Autoplay with sound refused: play muted, unmute on the next click.
+              video.muted = true;
+              video.play().catch(() => {});
+            });
+            if (!startedAt) {
+              startedAt = Date.now();
+              ticker = setInterval(tick, 250);
+            }
+            status('live');
+          },
+          onData(raw) {
+            let msg;
+            try { msg = JSON.parse(raw); } catch { return; }
+            if (msg?.type === 'configured') {
+              console.log('[director] configured', msg);
+            } else if (msg?.type === 'chunk_complete') {
+              chunks = Number(msg.chunk ?? msg.chunk_index ?? msg.index ?? chunks + 1) || chunks + 1;
+              $('chunk').textContent = `chunk ${chunks}`;
+              console.log('[director] chunk_complete', chunks);
+            } else if (msg?.type === 'error') {
+              status(String(msg.message ?? msg.error ?? 'model error'), true);
+            }
+          },
+          onError(err) {
+            status(err?.message ?? String(err), true);
+            stop();
+          },
+          onState(state) {
+            if (state === 'closed' && session) stop('session ended');
+          },
+        });
+      } catch (e) {
+        status(e?.message ?? String(e), true);
+        return;
+      }
+
+      const configure = {
+        type: 'configure',
+        protocol_version: 1,
+        prompt,
+        prompt_version: 1,
+        resolution,
+        aspect_ratio: aspectRatio,
+        memory,
+      };
+      if (script) configure.script = script;
+      if (imageUrl) configure.image_url = imageUrl;
+      session.send(configure); // queued until the control channel opens
+    }
+
+    // ---- boot ----------------------------------------------------------------
+    video.addEventListener('click', () => {
+      video.muted = false;
+      video.play().catch(() => {});
+    });
+    $('stop').addEventListener('click', () => stop('stopped'));
+    // Leaving the board must not leave a paid session running.
+    window.addEventListener('pagehide', () => stop());
+
+    if (!prompt) {
+      fatal('No prompt provided. Pass ?prompt=... in the URL.');
+    } else if (scriptError) {
+      fatal(`The script parameter is not valid: ${scriptError}`);
+    } else {
+      const conn = readConnection();
+      if (!conn) {
+        fatal('Fal is not connected in this browser. Open the Fal app on this board, connect it in Settings, then reload this embed.');
+      } else {
+        $('gate-title').textContent = `Live Director session · ${resolution} · ${aspectRatio}${script ? ` · ${script.length} beats` : ''}`;
+        $('gate-prompt').textContent = prompt;
+        $('gate').hidden = false;
+        $('start').addEventListener('click', () => start(conn), { once: true });
+      }
+    }
+  </script>
+</body>
+</html>
