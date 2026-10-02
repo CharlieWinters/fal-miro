@@ -35,6 +35,20 @@ directions to the mannequin's — SkeletonUtils' name-based copy assumes shared
 bone axes and produces a crumpled figure here). `panel/applyMotion.ts` creates
 such an embed from a motion + rig selection; nothing is generated or uploaded.
 
+`embed-director.html` is the one embed page that *generates* rather than plays:
+a live MiniMax H3 Max Director session (`minimax/h3-max/director`) over WebRTC,
+via `@fal-ai/client@1.11.0-alpha.4`'s experimental `fal.realtime.open(wma(...))`
+loaded from esm.sh (the stable 1.10.x has no realtime extensions). Its URL
+carries the prompt, `script` beats, `resolution`, `aspect_ratio`, `memory` and
+`image_url`, and never a key, because an embed URL is board content. It uses
+the viewer's own connection from the same `fal:backendConfig` localStorage the
+panel uses. In backend mode every WMA call goes through
+`/api/fal/realtime-proxy` (fal's `x-fal-target-url` proxy protocol), which adds
+FAL_KEY and is held by `backend/src/lib/realtimeProxy.ts` to the four calls a
+session makes, for the apps in `REALTIME_APPS`. Nothing opens until the viewer
+presses Start, since every board visitor loads the embed and a live session
+bills while it runs. Stop and `pagehide` close it.
+
 ### Results that are not media
 
 Two models return no media URL at all, so `extractOutputUrls` finds nothing and
