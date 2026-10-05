@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Fal for Miro — Compose</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: #111; color: #ddd;
+                 font: 12px/1.3 system-ui, -apple-system, sans-serif; }
+    body { display: flex; flex-direction: column; }
+    .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+           padding: 6px 8px; background: #1b1b1b; border-bottom: 1px solid #2a2a2a; }
+    .bar.bottom { border-top: 1px solid #2a2a2a; border-bottom: 0; }
+    .bar label { display: flex; align-items: center; gap: 4px; }
+    .sep { width: 1px; align-self: stretch; background: #333; margin: 0 2px; }
+    button, select, input[type=text], input[type=number] {
+      font: inherit; color: #eee; background: #2a2a2a; border: 1px solid #3a3a3a;
+      border-radius: 4px; padding: 3px 7px; }
+    button { cursor: pointer; }
+    button:hover { background: #343434; }
+    button.primary { background: #3d5afe; border-color: #3d5afe; color: #fff; }
+    button.on { background: #6a4b00; border-color: #a77700; }
+    button:disabled { opacity: .5; cursor: default; }
+    input[type=number] { width: 64px; }
+    input[type=text] { width: 180px; }
+    input[type=color] { width: 28px; height: 22px; padding: 0; border: 1px solid #3a3a3a; background: none; }
+    #stageWrap { flex: 1; min-height: 0; position: relative; overflow: hidden;
+                 background: repeating-conic-gradient(#1e1e1e 0 25%, #191919 0 50%) 0 0 / 20px 20px; }
+    #stage { position: absolute; left: 50%; top: 50%; transform-origin: 0 0;
+             box-shadow: 0 0 0 1px #555, 0 4px 24px #000a; cursor: grab; touch-action: none; }
+    #stage.dragging { cursor: grabbing; }
+    #scrub { flex: 1; min-width: 120px; position: relative; height: 22px; }
+    #scrub input { width: 100%; margin: 0; position: absolute; top: 3px; }
+    #keys { position: absolute; left: 0; right: 0; top: 0; height: 6px; pointer-events: none; }
+    #keys i { position: absolute; top: 0; width: 6px; height: 6px; margin-left: -3px;
+              background: #ffb300; transform: rotate(45deg); }
+    #time { font-variant-numeric: tabular-nums; min-width: 84px; text-align: right; }
+    #msg { color: #9aa; }
+    #msg.err { color: #ff7b7b; }
+    a { color: #8ab4ff; }
+  </style>
+</head>
+<body>
+  <!--
+    Compose: place a cut-out (alpha) video on a canvas of a different size and
+    render the result to a new video, all in the browser. Built for rotoscoped
+    clips — e.g. a SAM 3 matte merged into a VP9-alpha WebM — that need to sit
+    somewhere specific in a 16:9 (or any) frame.
+
+    Static page like embed-video.html: no backend, no build step, so it works
+    as a board embed or opened in its own tab.
+
+    Query params (all optional except url):
+      url  foreground video with alpha (VP9-alpha WebM; Safari cannot decode
+           alpha WebM, so use Chrome, Edge or Firefox)
+      w,h  canvas size in px (default 1920x1080)
+      bg   background: a CSS colour ("#0b0b0b") or an image/video URL
+    The placement lives in the URL hash, so a link restores it exactly.
+
+    The foreground and background are drawn onto a canvas, so they must be
+    served with CORS (Fal's CDN is). Export uses MediaRecorder on
+    canvas.captureStream(): it records in real time while the clip plays.
+    Downloads can be blocked inside an embed iframe — "Open in tab" sidesteps
+    that.
+  -->
+  <div class="bar">
+    <label>Canvas
+      <select id="preset">
+        <option value="1920x1080">16:9 · 1920×1080</option>
+        <option value="1080x1920">9:16 · 1080×1920</option>
+        <option value="1080x1080">1:1 · 1080×1080</option>
+        <option value="1080x1350">4:5 · 1080×1350</option>
+        <option value="2560x1080">21:9 · 2560×1080</option>
+        <option value="1440x1080">4:3 · 1440×1080</option>
+        <option value="custom">Custom…</option>
+      </select>
+    </label>
+    <input id="cw" type="number" min="16" max="4096" step="2" title="Width" />×
+    <input id="ch" type="number" min="16" max="4096" step="2" title="Height" />
+    <span class="sep"></span>
+    <label>BG <input id="bgColor" type="color" value="#000000" title="Background colour" /></label>
+    <input id="bgUrl" type="text" placeholder="…or image / video URL" title="Background image or video URL (needs CORS)" />
+    <span class="sep"></span>
+    <button id="center" title="Centre in canvas (double-click the canvas)">Centre</button>
+    <button id="fitH" title="Fit to canvas height">Fit height</button>
+    <button id="fill" title="Fill canvas width">Fill</button>
+    <button id="flip" title="Mirror horizontally">Flip</button>
+    <label title="Scale (scroll on the canvas)">Scale <input id="scale" type="range" min="0.05" max="3" step="0.005" style="width:90px" /></label>
+    <span id="scaleVal" style="min-width:38px"></span>
+  </div>
+
+  <div id="stageWrap"><canvas id="stage"></canvas></div>
+
+  <div class="bar bottom">
+    <button id="play" title="Play / pause (space)">▶</button>
+    <div id="scrub"><div id="keys"></div><input id="seek" type="range" min="0" max="1" step="0.001" value="0" /></div>
+    <span id="time">0.00 / 0.00</span>
+    <span class="sep"></span>
+    <button id="keyBtn" title="Animate: drag at different times to set keyframes">◆ Keyframes</button>
+    <button id="clearKeys" title="Remove all keyframes">Clear</button>
+    <span class="sep"></span>
+    <button id="export" class="primary">Export video</button>
+    <a id="openTab" target="_blank" rel="noopener">Open in tab</a>
+    <span id="msg"></span>
+  </div>
+
+  <video id="fg" muted playsinline preload="auto" crossorigin="anonymous" style="display:none"></video>
+  <video id="bgVid" muted playsinline loop preload="auto" crossorigin="anonymous" style="display:none"></video>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const q = new URLSearchParams(location.search);
+    const fg = $('fg'), bgVid = $('bgVid'), stage = $('stage'), ctx = stage.getContext('2d');
+    const msg = (text, err) => { $('msg').textContent = text || ''; $('msg').className = err ? 'err' : ''; };
+
+    // ---- state -----------------------------------------------------------
+    // x,y: centre of the foreground in canvas px. s: scale vs. the clip's
+    // native pixels. keys: [{t,x,y,s}] — when non-empty they drive placement.
+    const state = {
+      w: 1920, h: 1080, bg: '#000000', x: 960, y: 540, s: 0.5625, flip: false, keys: [],
+    };
+    let bgImg = null;           // HTMLImageElement when bg is an image URL
+    let bgIsVideo = false;
+    let animate = false;        // keyframe mode
+    let placed = false;         // initial placement applied once metadata loads
+    let exporting = false;
+    let seeking = false;        // user is dragging the scrubber
+
+    const url = q.get('url');
+    if (!url || !/^https?:\/\//.test(url)) {
+      document.body.innerHTML = '<p style="padding:16px">Missing or invalid <code>?url=</code> (an alpha WebM).</p>';
+      throw new Error('no url');
+    }
+    if (q.get('w') && q.get('h')) { state.w = +q.get('w') | 0 || 1920; state.h = +q.get('h') | 0 || 1080; }
+    if (q.get('bg')) state.bg = q.get('bg');
+    readHash();
+    $('openTab').href = location.href;
+
+    // Safari decodes VP9 but drops the alpha plane, so the cut-out arrives on black.
+    if (/^((?!chrome|android|crios|fxios|edg).)*safari/i.test(navigator.userAgent) && /\.webm(\?|$)/i.test(url)) {
+      msg('Safari cannot show WebM transparency — open in Chrome, Edge or Firefox.', true);
+    }
+
+    fg.src = url;
+    fg.addEventListener('loadedmetadata', () => {
+      if (!placed && !location.hash) fitHeight();
+      placed = true;
+      $('seek').max = fg.duration || 1;
+      syncUi(); draw();
+    });
+    fg.addEventListener('error', () => msg('Could not load the foreground video (needs CORS and a supported codec).', true));
+    fg.addEventListener('seeked', draw);
+    fg.addEventListener('ended', () => { if (!exporting) { $('play').textContent = '▶'; } });
+
+    // ---- placement helpers ----------------------------------------------
+    function fgSize() { return { w: fg.videoWidth || 1080, h: fg.videoHeight || 1920 }; }
+    function placementAt(t) {
+      const k = state.keys;
+      if (!k.length) return { x: state.x, y: state.y, s: state.s };
+      const pick = (a) => ({ x: a.x, y: a.y, s: a.s });
+      if (t <= k[0].t) return pick(k[0]);
+      if (t >= k[k.length - 1].t) return pick(k[k.length - 1]);
+      for (let i = 0; i < k.length - 1; i++) {
+        const a = k[i], b = k[i + 1];
+        if (t >= a.t && t <= b.t) {
+          const u = (t - a.t) / Math.max(1e-6, b.t - a.t);
+          return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, s: a.s + (b.s - a.s) * u };
+        }
+      }
+      return pick(k[0]);
+    }
+    // Apply a placement change: to the keyframe at the current time when
+    // animating, otherwise to the static placement.
+    function setPlacement(p) {
+      if (animate || state.keys.length) {
+        const t = fg.currentTime, tol = 0.5 / 30;
+        let key = state.keys.find((k) => Math.abs(k.t - t) <= tol);
+        if (!key) { key = { ...placementAt(t), t }; state.keys.push(key); state.keys.sort((a, b) => a.t - b.t); }
+        Object.assign(key, p);
+      } else {
+        Object.assign(state, p);
+      }
+      changed();
+    }
+    function current() { return placementAt(fg.currentTime); }
+    function fitHeight() { const f = fgSize(); setPlacement({ s: state.h / f.h, x: state.w / 2, y: state.h / 2 }); }
+    function fill() { const f = fgSize(); setPlacement({ s: state.w / f.w, x: state.w / 2, y: state.h / 2 }); }
+    function center() { setPlacement({ x: state.w / 2, y: state.h / 2 }); }
+
+    // ---- drawing ---------------------------------------------------------
+    function sizeStage() {
+      stage.width = state.w; stage.height = state.h;
+      const wrap = $('stageWrap').getBoundingClientRect();
+      const k = Math.min((wrap.width - 24) / state.w, (wrap.height - 24) / state.h);
+      stage.style.transform = `translate(${-state.w * k / 2}px, ${-state.h * k / 2}px) scale(${k})`;
+      stage._k = k;
+    }
+    function drawBackground() {
+      if (bgIsVideo && bgVid.readyState >= 2) return cover(bgVid, bgVid.videoWidth, bgVid.videoHeight);
+      if (bgImg && bgImg.complete && bgImg.naturalWidth) return cover(bgImg, bgImg.naturalWidth, bgImg.naturalHeight);
+      ctx.fillStyle = /^#|^rgb|^hsl|^[a-z]+$/i.test(state.bg) ? state.bg : '#000';
+      ctx.fillRect(0, 0, state.w, state.h);
+    }
+    function cover(src, sw, sh) {
+      const k = Math.max(state.w / sw, state.h / sh);
+      ctx.drawImage(src, (state.w - sw * k) / 2, (state.h - sh * k) / 2, sw * k, sh * k);
+    }
+    function draw() {
+      ctx.clearRect(0, 0, state.w, state.h);
+      drawBackground();
+      if (fg.readyState >= 2) {
+        const f = fgSize(), p = current();
+        const dw = f.w * p.s, dh = f.h * p.s;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        if (state.flip) ctx.scale(-1, 1);
+        ctx.drawImage(fg, -dw / 2, -dh / 2, dw, dh);
+        ctx.restore();
+      }
+      $('time').textContent = `${fg.currentTime.toFixed(2)} / ${(fg.duration || 0).toFixed(2)}`;
+      if (!seeking) $('seek').value = fg.currentTime;
+    }
+    (function loop() { if (!fg.paused || exporting) draw(); requestAnimationFrame(loop); })();
+
+    // ---- UI sync -----------------------------------------------------------
+    function syncUi() {
+      const preset = `${state.w}x${state.h}`;
+      $('preset').value = [...$('preset').options].some((o) => o.value === preset) ? preset : 'custom';
+      $('cw').value = state.w; $('ch').value = state.h;
+      if (/^https?:/.test(state.bg)) { $('bgUrl').value = state.bg; } else { $('bgUrl').value = ''; if (/^#[0-9a-f]{6}$/i.test(state.bg)) $('bgColor').value = state.bg; }
+      const p = current();
+      $('scale').value = p.s; $('scaleVal').textContent = `${Math.round(p.s * 100)}%`;
+      $('flip').classList.toggle('on', state.flip);
+      $('keyBtn').classList.toggle('on', animate || state.keys.length > 0);
+      const dur = fg.duration || 1;
+      $('keys').innerHTML = state.keys.map((k) => `<i style="left:${(k.t / dur) * 100}%"></i>`).join('');
+    }
+    let hashTimer;
+    function changed() {
+      syncUi(); draw();
+      clearTimeout(hashTimer);
+      hashTimer = setTimeout(writeHash, 250);
+    }
+    function writeHash() {
+      const r = (n) => Math.round(n * 1000) / 1000;
+      const o = { w: state.w, h: state.h, bg: state.bg, x: r(state.x), y: r(state.y), s: r(state.s), f: state.flip ? 1 : 0,
+                  k: state.keys.map((k) => [r(k.t), r(k.x), r(k.y), r(k.s)]) };
+      history.replaceState(null, '', '#' + encodeURIComponent(JSON.stringify(o)));
+      $('openTab').href = location.href;
+    }
+    function readHash() {
+      if (!location.hash) return;
+      try {
+        const o = JSON.parse(decodeURIComponent(location.hash.slice(1)));
+        Object.assign(state, { w: o.w, h: o.h, bg: o.bg, x: o.x, y: o.y, s: o.s, flip: !!o.f,
+                               keys: (o.k || []).map(([t, x, y, s]) => ({ t, x, y, s })) });
+        placed = true;
+      } catch { /* ignore a malformed hash */ }
+    }
+
+    // ---- background ------------------------------------------------------
+    function applyBackground() {
+      bgImg = null; bgIsVideo = false; bgVid.removeAttribute('src'); bgVid.load();
+      if (/^https?:/.test(state.bg)) {
+        if (/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(state.bg)) {
+          bgIsVideo = true; bgVid.src = state.bg;
+          bgVid.addEventListener('loadeddata', draw, { once: true });
+          bgVid.addEventListener('error', () => msg('Background video failed to load (CORS?).', true), { once: true });
+        } else {
+          bgImg = new Image(); bgImg.crossOrigin = 'anonymous';
+          bgImg.onload = draw; bgImg.onerror = () => msg('Background image failed to load (CORS?).', true);
+          bgImg.src = state.bg;
+        }
+      }
+      draw();
+    }
+
+    // ---- controls ----------------------------------------------------------
+    $('preset').addEventListener('change', (e) => {
+      if (e.target.value === 'custom') return;
+      const [w, h] = e.target.value.split('x').map(Number);
+      resizeCanvas(w, h);
+    });
+    for (const id of ['cw', 'ch']) $(id).addEventListener('change', () => resizeCanvas(+$('cw').value | 0, +$('ch').value | 0));
+    function resizeCanvas(w, h) {
+      if (!(w >= 16 && h >= 16)) return;
+      // Keep the subject in the same relative spot when the canvas changes.
+      const sx = w / state.w, sy = h / state.h, sk = h / state.h;
+      const map = (p) => ({ ...p, x: p.x * sx, y: p.y * sy, s: p.s * sk });
+      Object.assign(state, map(state));
+      state.keys = state.keys.map(map);
+      state.w = w; state.h = h;
+      sizeStage(); changed();
+    }
+    $('bgColor').addEventListener('input', (e) => { state.bg = e.target.value; applyBackground(); changed(); });
+    $('bgUrl').addEventListener('change', (e) => { state.bg = e.target.value.trim() || $('bgColor').value; applyBackground(); changed(); });
+    $('center').onclick = center; $('fitH').onclick = fitHeight; $('fill').onclick = fill;
+    $('flip').onclick = () => { state.flip = !state.flip; changed(); };
+    $('scale').addEventListener('input', (e) => setPlacement({ s: +e.target.value }));
+    $('keyBtn').onclick = () => {
+      animate = !animate;
+      if (animate && !state.keys.length) state.keys.push({ ...current(), t: fg.currentTime });
+      changed();
+      msg(animate ? 'Keyframes on: scrub to a time, then drag/scale to set a key.' : '');
+    };
+    $('clearKeys').onclick = () => { const p = current(); state.keys = []; animate = false; Object.assign(state, p); changed(); msg(''); };
+
+    $('play').onclick = togglePlay;
+    function togglePlay() {
+      if (exporting) return;
+      if (fg.paused) { if (fg.ended) fg.currentTime = 0; fg.play(); if (bgIsVideo) bgVid.play(); $('play').textContent = '❚❚'; }
+      else { fg.pause(); bgVid.pause(); $('play').textContent = '▶'; }
+    }
+    $('seek').addEventListener('input', (e) => { seeking = true; fg.currentTime = +e.target.value; });
+    $('seek').addEventListener('change', () => { seeking = false; });
+
+    // Drag to move, wheel to scale about the pointer, double-click to centre.
+    let drag = null;
+    const toCanvas = (e) => { const r = stage.getBoundingClientRect(); return { x: (e.clientX - r.left) / stage._k, y: (e.clientY - r.top) / stage._k }; };
+    stage.addEventListener('pointerdown', (e) => {
+      if (exporting) return;
+      stage.setPointerCapture(e.pointerId); stage.classList.add('dragging');
+      const p = current(), c = toCanvas(e);
+      drag = { dx: p.x - c.x, dy: p.y - c.y };
+    });
+    stage.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const c = toCanvas(e);
+      setPlacement({ x: c.x + drag.dx, y: c.y + drag.dy });
+    });
+    const endDrag = () => { drag = null; stage.classList.remove('dragging'); };
+    stage.addEventListener('pointerup', endDrag); stage.addEventListener('pointercancel', endDrag);
+    stage.addEventListener('dblclick', center);
+    stage.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (exporting) return;
+      const p = current(), c = toCanvas(e);
+      const k = Math.exp(-e.deltaY * 0.0015);
+      const s = Math.min(5, Math.max(0.02, p.s * k)), r = s / p.s;
+      setPlacement({ s, x: c.x + (p.x - c.x) * r, y: c.y + (p.y - c.y) * r });
+    }, { passive: false });
+    addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+      if (e.code === 'Space') { e.preventDefault(); togglePlay(); return; }
+      const step = e.shiftKey ? 10 : 1, p = current();
+      const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+      if (d) { e.preventDefault(); setPlacement({ x: p.x + d[0], y: p.y + d[1] }); }
+    });
+    addEventListener('resize', () => { sizeStage(); draw(); });
+
+    // ---- export ----------------------------------------------------------
+    function pickMime() {
+      // avc3 carries SPS/PPS in-band, so Chrome doesn't warn about the codec
+      // description changing mid-recording the way it does with avc1.
+      const c = ['video/mp4;codecs=avc3.640028', 'video/mp4;codecs=avc1.640028', 'video/mp4',
+                 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+      return c.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
+    }
+    $('export').onclick = async () => {
+      if (exporting) return;
+      const mime = pickMime();
+      if (!mime) return msg('This browser cannot record video (no MediaRecorder).', true);
+      try { ctx.getImageData(0, 0, 1, 1); } catch { return msg('A source is not CORS-enabled, so the canvas cannot be recorded.', true); }
+      exporting = true; animate = false; syncUi();
+      for (const b of document.querySelectorAll('button')) b.disabled = true;
+      const fps = 30, chunks = [];
+      const rec = new MediaRecorder(stage.captureStream(fps), { mimeType: mime, videoBitsPerSecond: Math.round(state.w * state.h * fps * 0.2) });
+      rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+      const done = new Promise((r) => { rec.onstop = r; });
+      fg.pause(); fg.currentTime = 0;
+      await new Promise((r) => fg.addEventListener('seeked', r, { once: true }));
+      if (bgIsVideo) { bgVid.currentTime = 0; }
+      draw();
+      rec.start(250);
+      const tick = setInterval(() => msg(`Recording ${fg.currentTime.toFixed(1)} / ${fg.duration.toFixed(1)} s…`), 200);
+      await fg.play(); if (bgIsVideo) bgVid.play();
+      await new Promise((r) => fg.addEventListener('ended', r, { once: true }));
+      draw(); rec.stop(); await done; clearInterval(tick);
+      bgVid.pause(); exporting = false;
+      for (const b of document.querySelectorAll('button')) b.disabled = false;
+      $('play').textContent = '▶';
+      const ext = mime.startsWith('video/mp4') ? 'mp4' : 'webm';
+      const blob = new Blob(chunks, { type: mime.split(';')[0] });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `compose-${state.w}x${state.h}.${ext}`;
+      a.textContent = `Download ${ext.toUpperCase()} (${(blob.size / 1e6).toFixed(1)} MB)`;
+      $('msg').replaceChildren(a, document.createTextNode(' — if nothing downloads here, use "Open in tab".'));
+      $('msg').className = '';
+      a.click();
+    };
+
+    sizeStage(); applyBackground(); syncUi();
+  </script>
+  <script>
+    // Swallow the browser's page-zoom gesture (see embed-video.html): this is
+    // a cross-origin iframe on the board, so an unhandled pinch would zoom the
+    // whole miro.com page. Plain wheel is handled above (scales the subject).
+    addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+    for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+      addEventListener(type, (e) => e.preventDefault());
+    }
+  </script>
+</body>
+</html>
