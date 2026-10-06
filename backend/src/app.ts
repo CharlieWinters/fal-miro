@@ -298,6 +298,34 @@ app.post('/api/fal/run', bodyLimit({ maxSize: 50 * 1024 * 1024 }), async (c) => 
 });
 
 // ---------------------------------------------------------------------------
+// Upload a file to Fal's CDN and return its URL.
+//
+// Body: the raw bytes, with their Content-Type. Used for media the browser
+// made itself (embed-compose.html's exports) that has to be hosted before it
+// can become a board embed. Only audio/video/image types are accepted, and
+// like every /api/fal/* route it needs the deployment's BACKEND_KEY.
+// ---------------------------------------------------------------------------
+const UPLOAD_MAX_BYTES = 95 * 1024 * 1024; // under Workers' 100 MB request cap
+
+app.post('/api/fal/upload', bodyLimit({ maxSize: UPLOAD_MAX_BYTES }), async (c) => {
+  const { falKey } = resolveEnv(c);
+  configureFal(falKey);
+  const type = (c.req.header('content-type') ?? '').split(';')[0].trim().toLowerCase();
+  if (!/^(video|audio|image)\/[a-z0-9.+-]+$/.test(type)) {
+    return c.json({ error: 'Only video, audio or image uploads are accepted' }, 415);
+  }
+  try {
+    const bytes = await c.req.arrayBuffer();
+    if (!bytes.byteLength) return c.json({ error: 'Empty upload' }, 400);
+    const url = await fal.storage.upload(new Blob([bytes], { type }));
+    return c.json({ url });
+  } catch (err) {
+    console.error('[upload] error:', messageOf(err));
+    return c.json({ error: falError(err) }, 502);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Poll status. endpointId is required (Fal scopes requests to an endpoint).
 // On completion we also fetch the result so the caller gets output URLs in one
 // round trip.

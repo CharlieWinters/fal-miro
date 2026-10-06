@@ -356,7 +356,36 @@ export const api = {
             (seconds && seconds > 0 ? `&seconds=${seconds}` : ''),
         ),
 
+  /**
+   * Put a file on Fal's CDN and return its URL — for media made in the
+   * browser (embed-compose.html's exports) that has to become an embed.
+   * Client mode uploads with the browser's key; backend mode streams the raw
+   * bytes to the backend, which uploads with FAL_KEY.
+   */
+  upload: (file: Blob): Promise<string> => (isClient() ? fal.storage.upload(file) : backendUpload(file)),
+
 };
+
+async function backendUpload(file: Blob): Promise<string> {
+  const base = backendUrl();
+  const key = backendKey();
+  if (!base || !key) {
+    throw new Error('Backend not configured — set your backend URL and key in Settings.');
+  }
+  const res = await fetch(`${base}/api/fal/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': file.type || 'application/octet-stream', 'x-fal-proxy-key': key },
+    body: file,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 404) {
+    throw new Error('This backend has no upload route yet — redeploy it from the latest fal-miro.');
+  }
+  if (!res.ok || typeof data?.url !== 'string') {
+    throw new Error(typeof data?.error === 'string' ? data.error : `${res.status} ${res.statusText}`);
+  }
+  return data.url;
+}
 
 // Embed pages ship as static files with the frontend itself (embed-video.html
 // etc, at the project root) — not the backend. None of them need a backend at

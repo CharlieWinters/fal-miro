@@ -7,7 +7,8 @@ const queue = vi.hoisted(() => ({
   result: vi.fn(),
   cancel: vi.fn(),
 }));
-vi.mock('@fal-ai/client', () => ({ fal: { config: vi.fn(), queue } }));
+const storage = vi.hoisted(() => ({ upload: vi.fn() }));
+vi.mock('@fal-ai/client', () => ({ fal: { config: vi.fn(), queue, storage } }));
 
 import { app, constantTimeEqual, isProxyableContentType, terminalStatusFor } from './app.js';
 
@@ -125,6 +126,44 @@ describe('GET /api/fal/status', () => {
     // No detail: an unexplained 5xx is still just upstream trouble.
     expect(terminalStatusFor(503, false)).toBeNull();
     expect(terminalStatusFor(undefined, true)).toBeNull();
+  });
+});
+
+describe('POST /api/fal/upload', () => {
+  const upload = (body: BodyInit, type: string, headers: Record<string, string> = authed) =>
+    app.request('/api/fal/upload', { method: 'POST', body, headers: { ...headers, 'Content-Type': type } });
+
+  it('needs the backend key like every /api/fal route', async () => {
+    const res = await upload(new Uint8Array([1, 2, 3]), 'video/mp4', {});
+    expect(res.status).toBe(401);
+    expect(storage.upload).not.toHaveBeenCalled();
+  });
+
+  it('uploads the raw bytes with their type and returns the CDN url', async () => {
+    storage.upload.mockResolvedValue('https://v3b.fal.media/files/b/x/out.mp4');
+    const res = await upload(new Uint8Array([1, 2, 3]), 'video/mp4');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ url: 'https://v3b.fal.media/files/b/x/out.mp4' });
+    const blob = storage.upload.mock.calls[0][0] as Blob;
+    expect(blob.type).toBe('video/mp4');
+    expect(blob.size).toBe(3);
+  });
+
+  it('refuses anything that is not media', async () => {
+    const res = await upload('<html></html>', 'text/html');
+    expect(res.status).toBe(415);
+    expect(storage.upload).not.toHaveBeenCalled();
+  });
+
+  it('refuses an empty body', async () => {
+    const res = await upload(new Uint8Array(), 'video/webm');
+    expect(res.status).toBe(400);
+  });
+
+  it('reports a Fal storage failure as 502', async () => {
+    storage.upload.mockRejectedValue(falError(500));
+    const res = await upload(new Uint8Array([1]), 'video/mp4');
+    expect(res.status).toBe(502);
   });
 });
 

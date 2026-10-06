@@ -1,6 +1,7 @@
 import { initializeMessageListener } from './communications';
 import { agentRegistry } from './agentRegistry';
 import { initNodeBridge } from './nodeBridge';
+import { initComposeBridge } from './composeBridge';
 import { run as resumeActiveJobs } from '../agents/resume_jobs/headless/logic';
 import { loadBackendConfig, watchBackendConfig } from '../shared/backendConfig';
 
@@ -10,6 +11,8 @@ async function init(): Promise<void> {
   initializeMessageListener(agentRegistry);
   // Answers embed nodes on the board (node.html) — works with the panel closed.
   initNodeBridge();
+  // Hosts and places videos rendered by embed-compose.html embeds.
+  initComposeBridge();
 
   // Open the panel when the user clicks the app icon in the Miro toolbar.
   await miro.board.ui.on('icon:click', async () => {
