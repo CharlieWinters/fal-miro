@@ -139,6 +139,8 @@
     let placed = false;         // initial placement applied once metadata loads
     let exporting = false;
     let seeking = false;        // user is dragging the scrubber
+    let lastExport = null;      // {blob, w, h, ext} of the current composition, or null when stale
+    let appHere = false, placing = false;  // Fal app answered the ping / an upload is in flight
 
     const url = q.get('url');
     if (!url || !/^https?:\/\//.test(url)) {
@@ -258,6 +260,7 @@
     }
     let hashTimer;
     function changed() {
+      if (!exporting && lastExport) { lastExport = null; syncBoardButton(); }
       syncUi(); draw();
       clearTimeout(hashTimer);
       hashTimer = setTimeout(writeHash, 250);
@@ -377,11 +380,14 @@
                  'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
       return c.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
     }
-    $('export').onclick = async () => {
-      if (exporting) return;
+    // Record the canvas while the clip plays once through. Resolves to the
+    // export ({blob, w, h, ext}) and remembers it as lastExport, or null if
+    // recording isn't possible here (the reason is shown in the bar).
+    async function runExport() {
+      if (exporting) return null;
       const mime = pickMime();
-      if (!mime) return msg('This browser cannot record video (no MediaRecorder).', true);
-      try { ctx.getImageData(0, 0, 1, 1); } catch { return msg('A source is not CORS-enabled, so the canvas cannot be recorded.', true); }
+      if (!mime) { msg('This browser cannot record video (no MediaRecorder).', true); return null; }
+      try { ctx.getImageData(0, 0, 1, 1); } catch { msg('A source is not CORS-enabled, so the canvas cannot be recorded.', true); return null; }
       exporting = true; animate = false; syncUi();
       for (const b of document.querySelectorAll('button')) b.disabled = true;
       const fps = 30, chunks = [];
@@ -402,7 +408,14 @@
       $('play').textContent = '▶';
       const ext = mime.startsWith('video/mp4') ? 'mp4' : 'webm';
       const blob = new Blob(chunks, { type: mime.split(';')[0] });
-      lastExport = { blob, w: state.w, h: state.h };
+      lastExport = { blob, w: state.w, h: state.h, ext };
+      syncBoardButton();
+      return lastExport;
+    }
+    $('export').onclick = async () => {
+      const out = await runExport();
+      if (!out) return;
+      const { blob, ext } = out;
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = `compose-${state.w}x${state.h}.${ext}`;
@@ -410,7 +423,6 @@
       const hint = inBoard ? ' — or "Add to board".' : '';
       $('msg').replaceChildren(a, document.createTextNode(hint));
       $('msg').className = '';
-      syncBoardButton();
       // Inside an embed the main path is "Add to board"; only auto-download
       // when this page is open in its own tab.
       if (!inBoard) a.click();
@@ -421,7 +433,6 @@
                   progress: 'fal-compose:progress', placed: 'fal-compose:placed', error: 'fal-compose:error' };
     const inBoard = window.top !== window;
     const cid = /^[a-z0-9_-]{1,64}$/i.test(q.get('cid') || '') ? q.get('cid') : null;
-    let lastExport = null, appHere = false, placing = false;
     const newRid = () => 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     // Post to every frame on the page at our own origin only. Indexed frame
     // access and .length are allowed cross-origin, so the walk reaches the
@@ -447,9 +458,10 @@
     });
     function syncBoardButton() {
       const b = $('toBoard');
-      b.disabled = exporting || placing || !lastExport;
-      b.title = !lastExport ? 'Export first. Needs the Fal for Miro app on this board.'
-        : appHere ? 'Upload the export and place it on the board' : 'The Fal for Miro app did not answer — is it installed on this board?';
+      b.disabled = exporting || placing;
+      b.title = !appHere ? 'The Fal for Miro app has not answered yet — it must be installed on this board.'
+        : lastExport ? 'Upload the export and place it on the board'
+        : 'Export the canvas, then upload it and place it on the board';
     }
     // Ask whether the app is here; a few tries, since its iframe may still be loading.
     if (inBoard) {
@@ -460,8 +472,9 @@
     } else {
       $('toBoard').style.display = 'none';
     }
-    $('toBoard').onclick = () => {
-      if (!lastExport || placing) return;
+    $('toBoard').onclick = async () => {
+      if (placing || exporting) return;
+      if (!lastExport && !(await runExport())) return;
       const rid = newRid();
       placing = true; syncBoardButton();
       msg(appHere ? 'Sending to the Fal app…' : 'Looking for the Fal app on this board…');
