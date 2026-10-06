@@ -32,6 +32,7 @@ import { toneOf, toneFill, toneOutline } from '../../shared/capabilityTone';
 import { CapabilityIcon } from '../CapabilityIcon';
 import { listRecipeCards, parseRecipeCard, type RecipeCard, type RecipeCardRef } from '../../shared/recipeCard';
 import { convertCardToNode } from '../../shared/nodeBoard';
+import { createComposeFromVideo } from '../../shared/composeBoard';
 import { applyMotionToCharacter, pickMotionAndRig } from '../applyMotion';
 
 /** "→ Image" capture utilities that open in the modal for a large view. */
@@ -341,7 +342,26 @@ export function HomeScreen({
     }
   };
 
+  // Compose canvas. embed-compose.html loads the clip straight from Fal's CDN
+  // (CORS-enabled), so unlike the capture tools this works in client mode too.
+  const composeSourceId = selectedEmbed?.url && unwrapVideoEmbedUrl(selectedEmbed.url) ? selectedEmbed.id : null;
+  const [composeNote, setComposeNote] = useState<string | null>(null);
+  const [composing, setComposing] = useState(false);
+  const openCompose = async (videoEmbedId: string) => {
+    setComposing(true);
+    setComposeNote(null);
+    try {
+      await createComposeFromVideo(videoEmbedId);
+      setComposeNote('Compose canvas added to the right of the video. Place the clip, export, then "Add to board".');
+    } catch (e) {
+      setComposeNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setComposing(false);
+    }
+  };
+
   const hasSelectionZone =
+    Boolean(composeSourceId) ||
     Boolean(selectedRecipe) ||
     Boolean(selectedNodeId) ||
     (Boolean(selectedEmbed) &&
@@ -386,6 +406,17 @@ export function HomeScreen({
             />
           )}
           {convertNote && <div className="notice">{convertNote}</div>}
+          {composeSourceId && (
+            <ToolCard
+              capability="video"
+              title={composing ? 'Opening…' : 'Compose on a canvas'}
+              sub="Place this (cut-out) clip on a 16:9 or any-size canvas and render a new video"
+              onOpen={() => {
+                if (!composing) void openCompose(composeSourceId);
+              }}
+            />
+          )}
+          {composeNote && <div className="notice">{composeNote}</div>}
           {selectedEmbed && has3dViewerSelected && (
             <ToolCard
               capability="model3d"

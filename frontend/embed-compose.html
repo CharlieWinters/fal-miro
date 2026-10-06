@@ -65,6 +65,16 @@
     canvas.captureStream(): it records in real time while the clip plays.
     Downloads can be blocked inside an embed iframe — "Open in tab" sidesteps
     that.
+
+    "Add to board" (inside a board with the Fal for Miro app installed) hands
+    the export to the app's headless iframe over the same frame-walk channel
+    node.html uses (src/shared/compose.ts, src/headless/composeBridge.ts). The
+    app uploads it to Fal's CDN and places an embed-video.html embed beside
+    this one. The app creates compose embeds itself (panel ▸ "Compose on a
+    canvas" on a selected video) with a `cid` in both the URL and the embed's
+    metadata, and finds this embed by that metadata (src/shared/composeBoard.ts).
+    This page and the app must be on the same origin; the headless side
+    ignores anything else.
   -->
   <div class="bar">
     <label>Canvas
@@ -103,6 +113,7 @@
     <button id="clearKeys" title="Remove all keyframes">Clear</button>
     <span class="sep"></span>
     <button id="export" class="primary">Export video</button>
+    <button id="toBoard" title="Export first. Needs the Fal for Miro app on this board.">Add to board</button>
     <a id="openTab" target="_blank" rel="noopener">Open in tab</a>
     <span id="msg"></span>
   </div>
@@ -384,16 +395,86 @@
       $('play').textContent = '▶';
       const ext = mime.startsWith('video/mp4') ? 'mp4' : 'webm';
       const blob = new Blob(chunks, { type: mime.split(';')[0] });
+      lastExport = { blob, w: state.w, h: state.h };
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = `compose-${state.w}x${state.h}.${ext}`;
       a.textContent = `Download ${ext.toUpperCase()} (${(blob.size / 1e6).toFixed(1)} MB)`;
-      $('msg').replaceChildren(a, document.createTextNode(' — if nothing downloads here, use "Open in tab".'));
+      const hint = inBoard ? ' — or "Add to board".' : '';
+      $('msg').replaceChildren(a, document.createTextNode(hint));
       $('msg').className = '';
-      a.click();
+      syncBoardButton();
+      // Inside an embed the main path is "Add to board"; only auto-download
+      // when this page is open in its own tab.
+      if (!inBoard) a.click();
     };
 
-    sizeStage(); applyBackground(); syncUi();
+    // ---- add to board (see the header comment and src/shared/compose.ts) ----
+    const MSG = { ping: 'fal-compose:ping', pong: 'fal-compose:pong', place: 'fal-compose:place',
+                  progress: 'fal-compose:progress', placed: 'fal-compose:placed', error: 'fal-compose:error' };
+    const inBoard = window.top !== window;
+    const cid = /^[a-z0-9_-]{1,64}$/i.test(q.get('cid') || '') ? q.get('cid') : null;
+    let lastExport = null, appHere = false, placing = false;
+    const newRid = () => 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    // Post to every frame on the page at our own origin only. Indexed frame
+    // access and .length are allowed cross-origin, so the walk reaches the
+    // app's iframes; the browser drops the message for any other origin.
+    function postToAppFrames(message) {
+      const out = [];
+      const walk = (win, depth) => {
+        if (depth > 8 || out.length > 200) return;
+        out.push(win);
+        let n = 0; try { n = win.length; } catch { return; }
+        for (let i = 0; i < n; i++) { try { walk(win[i], depth + 1); } catch { /* skip */ } }
+      };
+      try { walk(window.top, 0); } catch { return; }
+      for (const w of out) { if (w !== window) { try { w.postMessage(message, location.origin); } catch { /* detached */ } } }
+    }
+    const pending = new Map();   // rid → handler
+    addEventListener('message', (e) => {
+      if (e.origin !== location.origin) return;
+      const d = e.data;
+      if (!d || d.v !== 1 || typeof d.rid !== 'string') return;
+      const h = pending.get(d.rid);
+      if (h) h(d);
+    });
+    function syncBoardButton() {
+      const b = $('toBoard');
+      b.disabled = exporting || placing || !lastExport;
+      b.title = !lastExport ? 'Export first. Needs the Fal for Miro app on this board.'
+        : appHere ? 'Upload the export and place it on the board' : 'The Fal for Miro app did not answer — is it installed on this board?';
+    }
+    // Ask whether the app is here; a few tries, since its iframe may still be loading.
+    if (inBoard) {
+      const rid = newRid(); let tries = 0;
+      pending.set(rid, (d) => { if (d.type === MSG.pong) { appHere = true; pending.delete(rid); clearInterval(t); syncBoardButton(); } });
+      const t = setInterval(() => { if (++tries > 10) { clearInterval(t); pending.delete(rid); return; } postToAppFrames({ type: MSG.ping, v: 1, rid }); }, 1500);
+      postToAppFrames({ type: MSG.ping, v: 1, rid });
+    } else {
+      $('toBoard').style.display = 'none';
+    }
+    $('toBoard').onclick = () => {
+      if (!lastExport || placing) return;
+      const rid = newRid();
+      placing = true; syncBoardButton();
+      msg(appHere ? 'Sending to the Fal app…' : 'Looking for the Fal app on this board…');
+      const giveUp = setTimeout(() => {
+        if (!placing) return;
+        pending.delete(rid); placing = false; syncBoardButton();
+        msg('No answer from the Fal for Miro app. Is it installed on this board (and on the same site as this page)?', true);
+      }, appHere ? 180000 : 8000);
+      let heard = false;
+      pending.set(rid, (d) => {
+        if (!heard) { heard = true; clearTimeout(giveUp); }
+        if (d.type === MSG.progress) { msg(d.message); return; }
+        pending.delete(rid); placing = false; syncBoardButton();
+        if (d.type === MSG.placed) msg('Added to the board ✓');
+        else if (d.type === MSG.error) msg('Could not add to the board: ' + d.error, true);
+      });
+      postToAppFrames({ type: MSG.place, v: 1, rid, cid, video: lastExport.blob, width: lastExport.w, height: lastExport.h });
+    };
+
+    sizeStage(); applyBackground(); syncUi(); syncBoardButton();
   </script>
   <script>
     // Swallow the browser's page-zoom gesture (see embed-video.html): this is
