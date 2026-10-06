@@ -431,6 +431,18 @@ function embedPageUrl(page: string, assetUrl: string): string {
  * nothing secret and nothing that could go stale belongs in it. Everything
  * else is read from the embed's metadata by the headless iframe.
  */
+/**
+ * A compose embed's page: the cut-out video to place, the canvas size, and
+ * the embed's cid (see shared/compose.ts) plus the cache-buster.
+ */
+export function composeEmbedUrl(videoUrl: string, cid: string, canvas: { width: number; height: number }): string {
+  const cb = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  return (
+    `${frontendPageUrl('embed-compose.html')}?url=${encodeURIComponent(videoUrl)}` +
+    `&w=${canvas.width}&h=${canvas.height}&cid=${encodeURIComponent(cid)}&cb=${cb}`
+  );
+}
+
 export function nodePageUrl(nid: string): string {
   const cb = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   return `${frontendPageUrl('node.html')}?nid=${encodeURIComponent(nid)}&cb=${cb}`;

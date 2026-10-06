@@ -2,11 +2,13 @@
 // can post to the headless iframe, so the parser is the boundary: it must
 // refuse what isn't a well-formed ping or a sane video placement.
 import { describe, expect, it } from 'vitest';
-import { COMPOSE_MAX_BYTES, COMPOSE_MSG, parseComposeRequest, placementFor } from './compose';
+import { COMPOSE_MAX_BYTES, COMPOSE_MSG, parseComposeMeta, parseComposeRequest, placementFor } from './compose';
+
+const CID = '3f2b8c1e-9a4d-4e7b-8c2a-1d5e6f7a8b9c';
 
 const video = (size = 1000, type = 'video/mp4') => new Blob([new Uint8Array(size)], { type });
 const place = (over: Record<string, unknown> = {}) => ({
-  type: COMPOSE_MSG.place, v: 1, rid: 'cabc123', cid: 'skater', video: video(), width: 1920, height: 1080, ...over,
+  type: COMPOSE_MSG.place, v: 1, rid: 'cabc123', cid: CID, video: video(), width: 1920, height: 1080, ...over,
 });
 
 describe('parseComposeRequest', () => {
@@ -18,11 +20,12 @@ describe('parseComposeRequest', () => {
 
   it('accepts a well-formed placement', () => {
     const req = parseComposeRequest(place());
-    expect(req).toMatchObject({ type: COMPOSE_MSG.place, rid: 'cabc123', cid: 'skater', width: 1920, height: 1080 });
+    expect(req).toMatchObject({ type: COMPOSE_MSG.place, rid: 'cabc123', cid: CID, width: 1920, height: 1080 });
   });
 
   it('drops a malformed cid instead of refusing the placement', () => {
     expect(parseComposeRequest(place({ cid: 'a b"<>' }))).toMatchObject({ cid: null });
+    expect(parseComposeRequest(place({ cid: 'skater1' }))).toMatchObject({ cid: null }); // not a UUID
     expect(parseComposeRequest(place({ cid: undefined }))).toMatchObject({ cid: null });
   });
 
@@ -60,5 +63,20 @@ describe('placementFor', () => {
 
   it('centres on the viewport when there is no anchor', () => {
     expect(placementFor({ width: 1920, height: 1080 }, null, viewport)).toMatchObject({ x: 1000, y: 500 });
+  });
+});
+
+describe('parseComposeMeta', () => {
+  const src = 'https://v3b.fal.media/files/b/x/skater.webm';
+  it('accepts what composeBoard writes', () => {
+    expect(parseComposeMeta({ v: 1, cid: CID, source: src })).toEqual({ v: 1, cid: CID, source: src });
+  });
+  it.each([
+    ['nothing', undefined],
+    ['wrong version', { v: 2, cid: CID, source: src }],
+    ['non-UUID cid', { v: 1, cid: 'skater1', source: src }],
+    ['non-https source', { v: 1, cid: CID, source: 'javascript:alert(1)' }],
+  ])('refuses %s', (_l, data) => {
+    expect(parseComposeMeta(data)).toBeNull();
   });
 });

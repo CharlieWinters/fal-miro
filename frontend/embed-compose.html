@@ -70,8 +70,11 @@
     the export to the app's headless iframe over the same frame-walk channel
     node.html uses (src/shared/compose.ts, src/headless/composeBridge.ts). The
     app uploads it to Fal's CDN and places an embed-video.html embed beside
-    this one — matched by the optional `cid` query param. This page and the
-    app must be on the same origin; the headless side ignores anything else.
+    this one. The app creates compose embeds itself (panel ▸ "Compose on a
+    canvas" on a selected video) with a `cid` in both the URL and the embed's
+    metadata, and finds this embed by that metadata (src/shared/composeBoard.ts).
+    This page and the app must be on the same origin; the headless side
+    ignores anything else.
   -->
   <div class="bar">
     <label>Canvas
