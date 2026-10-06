@@ -5,10 +5,13 @@ compatibility_date = "2026-08-01"
 # Non-secret config. Override per-environment below, or with `--var` on
 # `wrangler dev` / `wrangler deploy`.
 [vars]
-# Every origin your frontend is served from. The local dev server is here by
-# default; add your own deployment (e.g. "https://your-org.github.io") before
-# the panel will be allowed to talk to this backend.
-ALLOWED_ORIGINS = "http://localhost:5175"
+# Every origin your frontend is served from: this repo's GitHub Pages site and
+# the local dev server. Forking? Replace the github.io origin with your own
+# deployment's. `wrangler deploy` pushes this value and replaces whatever the
+# live Worker had, so a deploy from a file that lacks your origin blocks the
+# panel with CORS errors. Listing an origin grants nothing by itself — every
+# /api/fal/* call still needs BACKEND_KEY.
+ALLOWED_ORIGINS = "https://charliewinters.github.io,http://localhost:5175"
 FAL_PLATFORM_API_BASE = "https://api.fal.ai/v1"
 # Verbose per-request logging, including a summary of every generation input.
 # Off by default; set to "1" while debugging.

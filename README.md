@@ -94,8 +94,11 @@ wrangler secret put BACKEND_KEY      # paste the value you just generated
 npm run deploy:worker
 ```
 
-`wrangler.toml` holds the non-secret config (`ALLOWED_ORIGINS`, etc.) — edit
-`ALLOWED_ORIGINS` to your deployed frontend's origin before deploying. For
+`wrangler.toml` holds the non-secret config (`ALLOWED_ORIGINS`, etc.).
+`ALLOWED_ORIGINS` already lists this repo's GitHub Pages site and the local
+dev server; if your frontend is served from somewhere else, put that origin
+there before deploying. Every deploy replaces the live value with the file's,
+so an origin missing from the file is blocked (CORS) after the next deploy. For
 local Workers dev, copy `.dev.vars.example` to `.dev.vars` (gitignored, never
 committed) and run `npm run dev:worker`.
 
