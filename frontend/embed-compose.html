@@ -161,8 +161,15 @@
       placed = true;
       $('seek').max = fg.duration || 1;
       syncUi(); draw();
+      // Metadata arrives before any frame is decoded, so that draw shows only
+      // the background, and a paused video never decodes one on its own. A
+      // tiny seek makes the browser decode the first frame; `seeked` and
+      // `loadeddata` below then paint it.
+      if (fg.readyState < 2 && fg.paused && fg.currentTime === 0) fg.currentTime = 0.001;
     });
     fg.addEventListener('error', () => msg('Could not load the foreground video (needs CORS and a supported codec).', true));
+    fg.addEventListener('loadeddata', draw);
+    fg.addEventListener('canplay', draw);
     fg.addEventListener('seeked', draw);
     fg.addEventListener('ended', () => { if (!exporting) { $('play').textContent = '▶'; } });
 
