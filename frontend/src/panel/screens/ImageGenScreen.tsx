@@ -24,6 +24,7 @@ import { COMMON_ARGS, type FalModel } from '../../shared/falCatalog';
 import {
   parseFalInputSchema,
   defaultsFor,
+  pickAudioReferenceField,
   pickReferenceField,
   pickVideoReferenceField,
   pickViewImageFields,
@@ -114,6 +115,7 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
     if (!seed) return;
     imageBasket.replace(seed.images);
     videoBasket.replace(seed.videos);
+    audioBasket.replace(seed.audios);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.token]);
 
@@ -134,6 +136,13 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
   const referenceField = useMemo(() => pickReferenceField(fields), [fields]);
   const videoReferenceField = useMemo(() => pickVideoReferenceField(fields), [fields]);
   const isVideo = model.capability === 'video';
+  // Audio input (e.g. a lip-sync model's `audio_url`). Video models only: the
+  // image / 3D / panorama agents this screen also drives don't read audio, so
+  // elsewhere the field stays a plain URL box rather than a basket that's ignored.
+  const audioReferenceField = useMemo(
+    () => (isVideo ? pickAudioReferenceField(fields) : null),
+    [fields, isVideo],
+  );
   const isSegment = model.capability === 'segment';
   const is3d = model.capability === 'model3d';
   const isPanorama = model.capability === 'panorama';
@@ -171,6 +180,9 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
   const takesMultiVideo = Boolean(videoReferenceField?.multiple) && !multiView;
   const takesSingleVideo = Boolean(videoReferenceField) && !videoReferenceField?.multiple && !multiView;
   const videoRequired = videoPrimary;
+  const takesAudio = Boolean(audioReferenceField) && !multiView;
+  const takesMultiAudio = takesAudio && Boolean(audioReferenceField?.multiple);
+  const audioRequired = takesAudio && Boolean(audioReferenceField?.required);
 
   // Reference baskets — ordered lists the user builds, one per input. See
   // hooks/basket.ts. Nothing mirrors the selection, so clicking around the
@@ -178,6 +190,7 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
   const boardSel = useBoardSelection();
   const imageBasket = useBasket('image', boardSel);
   const videoBasket = useBasket('video', boardSel);
+  const audioBasket = useBasket('audio', boardSel);
   const noteBasket = useBasket('note', boardSel);
   const [promptText, setPromptText] = useState('');
   /** Notes (in basket order) + the typed text — what actually gets sent. */
@@ -189,6 +202,8 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
   const effectiveSourceImage: ImageItem | null = effectiveSelectedImages[0] ?? null;
   const effectiveSelectedVideos: EmbedItem[] = videoBasket.items.map((i) => ({ id: i.id, title: i.label }));
   const effectiveSourceVideo: EmbedItem | null = effectiveSelectedVideos[0] ?? null;
+  // A single-value audio field sends the first basket item.
+  const sentAudioIds = (takesMultiAudio ? audioBasket.items : audioBasket.items.slice(0, 1)).map((a) => a.id);
 
   // The frame the current references came from, if any — live selection
   // wins, else falls back to the reopened card's own frame. Lets the output
@@ -255,12 +270,16 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
     // A row whose board item was deleted would send a dead reference.
     if (imageBasket.hasMissing) return 'An image in the basket is no longer on the board — remove it first.';
     if (videoBasket.hasMissing) return 'A video in the basket is no longer on the board — remove it first.';
+    if (audioBasket.hasMissing) return 'An audio clip in the basket is no longer on the board — remove it first.';
     if (noteBasket.hasMissing) return 'A sticky note in the prompt is no longer on the board — remove it first.';
     if (imageRequired && effectiveSelectedImages.length === 0) {
       return `Add ${takesMulti ? 'one or more images' : 'an image'} to the Image basket first — select on the board, then press Add.`;
     }
     if (videoRequired && effectiveSelectedVideos.length === 0) {
       return `Add ${takesMultiVideo ? 'one or more Fal videos' : 'a Fal video'} to the Video basket first — select on the board, then press Add.`;
+    }
+    if (audioRequired && sentAudioIds.length === 0) {
+      return `Add ${takesMultiAudio ? 'one or more Fal audio clips' : 'a Fal audio clip'} to the Audio basket first — select on the board, then press Add.`;
     }
     if (multiView) {
       const missing = viewFields.find((f) => f.required && !views[f.name]);
@@ -327,6 +346,7 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
         ...(usesImageAgent && referenceFrameId ? { referenceFrameId } : {}),
         ...(referenceField && !multiView ? { referenceField } : {}),
         ...(videoReferenceField && !multiView ? { videoReferenceField } : {}),
+        ...(takesAudio && audioReferenceField ? { audioReferenceField, sourceAudioIds: sentAudioIds } : {}),
         ...(multiView
           ? { viewImages: viewFields.filter((f) => views[f.name]).map((f) => ({ field: f.name, imageId: views[f.name].id })) }
           : {}),
@@ -376,6 +396,8 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
     if (takesMulti) connectIds.push(...effectiveSelectedImages.map((s) => s.id));
     if (takesSingleVideo && effectiveSourceVideo) connectIds.push(effectiveSourceVideo.id);
     if (takesMultiVideo) connectIds.push(...effectiveSelectedVideos.map((s) => s.id));
+    // Pasted URLs have no board item to connect to.
+    if (takesAudio) connectIds.push(...sentAudioIds.filter((id) => !/^https?:\/\//i.test(id)));
     // Lineage follows what the baskets actually sent, which is by definition
     // what the user put in them.
     connectIds.push(...noteBasket.items.map((n) => n.id));
@@ -390,6 +412,7 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
         connectIds.push(
           ...expanded.images.map((i) => i.id),
           ...expanded.videos.map((v) => v.id),
+          ...(takesAudio ? expanded.audios.map((a) => a.id) : []),
           ...expanded.stickies.map((s) => s.id),
         );
       }
@@ -447,6 +470,15 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
             />
           )}
 
+          {takesAudio && (
+            <BasketPanel
+              basket={audioBasket}
+              title={takesMultiAudio ? 'Audio references' : 'Audio'}
+              cap={takesMultiAudio ? undefined : 1}
+              onInsertToken={(t) => setPromptText((p) => (p && !/\s$/.test(p) ? `${p} ${t}` : p + t))}
+            />
+          )}
+
           {multiView && (
             <div className="view-slots">
               <div className="hint">
@@ -493,7 +525,7 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
               basket={noteBasket}
               text={promptText}
               onTextChange={setPromptText}
-              counts={{ Image: imageBasket.items.length, Video: videoBasket.items.length, Audio: 0 }}
+              counts={{ Image: imageBasket.items.length, Video: videoBasket.items.length, Audio: audioBasket.items.length }}
             />
           )}
 
@@ -508,6 +540,7 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
                 : [
                     ...((takesSingle || takesMulti) && referenceField ? [referenceField.name] : []),
                     ...((takesSingleVideo || takesMultiVideo) && videoReferenceField ? [videoReferenceField.name] : []),
+                    ...(takesAudio && audioReferenceField ? [audioReferenceField.name] : []),
                   ]),
               // The prompt basket owns this field entirely, multiView or not.
               // Left inside the non-multiView branch, a multiView model with a
@@ -554,6 +587,8 @@ export function ImageGenScreen({ model, seed }: { model: FalModel; seed?: Recipe
             videoReferenceField={videoReferenceField}
             sourceVideo={effectiveSourceVideo}
             videoCount={takesMultiVideo ? effectiveSelectedVideos.length : effectiveSourceVideo ? 1 : 0}
+            audioReferenceField={takesAudio ? audioReferenceField : null}
+            audioCount={sentAudioIds.length}
             views={multiView ? viewFields.filter((f) => views[f.name]).map((f) => f.label) : null}
             assetName={usesImageAgent && assetName.trim() ? assetName.trim() : null}
           />
@@ -780,6 +815,8 @@ function RequestPreview({
   videoReferenceField,
   sourceVideo,
   videoCount,
+  audioReferenceField,
+  audioCount,
   views,
   assetName,
 }: {
@@ -792,6 +829,8 @@ function RequestPreview({
   videoReferenceField: { name: string; multiple: boolean; required: boolean } | null;
   sourceVideo: EmbedItem | null;
   videoCount: number;
+  audioReferenceField: { name: string; multiple: boolean; required: boolean } | null;
+  audioCount: number;
   views: string[] | null;
   assetName: string | null;
 }) {
@@ -845,6 +884,12 @@ function RequestPreview({
                   ? `source → ${videoReferenceField.name}`
                   : 'none selected'}
             </span>
+          </div>
+        )}
+        {audioReferenceField && (
+          <div>
+            <span className="k">Audio</span>
+            <span className="v">{audioCount > 0 ? `${audioCount} → ${audioReferenceField.name}` : 'none selected'}</span>
           </div>
         )}
         <div>

@@ -49,6 +49,10 @@ export type VideoGenPayload = {
   /** Board video embeds for a `video_urls`-style array field. */
   sourceVideoIds?: string[];
   videoReferenceField?: { name: string; multiple: boolean; required: boolean };
+  /** Board Fal-audio embeds (or pasted URLs) for the model's audio field, in
+   *  basket order — e.g. a lip-sync model's `audio_url`. */
+  sourceAudioIds?: string[];
+  audioReferenceField?: { name: string; multiple: boolean; required: boolean };
   /**
    * First-last-frame models: the two board images to use, and the schema field
    * names they map to (e.g. first_frame_url / last_frame_url).
@@ -105,6 +109,8 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
     sourceVideoId,
     sourceVideoIds,
     videoReferenceField,
+    sourceAudioIds,
+    audioReferenceField,
     cardAnchorId,
     referenceFrameId,
   } = (payload ?? {}) as VideoGenPayload;
@@ -246,6 +252,31 @@ export async function run(payload: unknown, requestId = ''): Promise<VideoGenRes
       }
       if (videoReferenceField.required && isEmpty(finalInput[videoReferenceField.name])) {
         throw new Error('Select a Fal video on the board to use as the source clip.');
+      }
+    }
+
+    // Source audio → the model's audio field (lip-sync, audio-to-video).
+    if (audioReferenceField) {
+      broadcastUpdate({ requestId, status: 'queued', message: 'Reading source audio…' });
+      const urls: string[] = [];
+      for (const id of sourceAudioIds ?? []) {
+        // A pasted URL sits in the basket with the URL as its id (see
+        // basket.addUrl) — there is no board item to read, so send it as-is.
+        if (/^https?:\/\//i.test(id)) {
+          urls.push(id);
+          continue;
+        }
+        const a = await getAudioRef(id);
+        if (a) {
+          urls.push(a.url);
+          parents.add(id);
+        }
+      }
+      if (urls.length && isEmpty(finalInput[audioReferenceField.name])) {
+        finalInput[audioReferenceField.name] = audioReferenceField.multiple ? urls : urls[0];
+      }
+      if (audioReferenceField.required && isEmpty(finalInput[audioReferenceField.name])) {
+        throw new Error('Select a Fal audio clip on the board to use as the source audio.');
       }
     }
   }

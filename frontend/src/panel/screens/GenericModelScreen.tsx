@@ -214,7 +214,8 @@ export function GenericModelScreen({ model, seed }: { model: FalModel; seed?: Re
       videoReferenceField: videoReferenceField ?? null,
     };
 
-    const connectIds = [...refImageIds, ...refVideoIds, ...refAudioIds];
+    // Pasted audio URLs have no board item to connect to.
+    const connectIds = [...refImageIds, ...refVideoIds, ...refAudioIds.filter((id) => !/^https?:\/\//i.test(id))];
     connectIds.push(...noteBasket.items.map((n) => n.id));
 
     // A selected frame's contents count as connected too.
