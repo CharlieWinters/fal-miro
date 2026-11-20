@@ -20,18 +20,18 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@fal-ai/client": "^1.10.1",
+    "@fal-ai/client": "^1.11.0",
     "dotenv": "^17.4.2",
-    "hono": "^4.13.5"
+    "hono": "^4.13.19"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260904.1",
-    "@hono/node-server": "^2.1.1",
-    "@types/node": "^26.4.1",
-    "tsx": "^4.23.13",
+    "@cloudflare/workers-types": "^5.20261117.1",
+    "@hono/node-server": "^2.1.9",
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.0",
-    "wrangler": "^4.131.0"
+    "vitest": "^5.1.0",
+    "wrangler": "^4.163.0"
   },
   "engines": {
     "node": ">=22"
